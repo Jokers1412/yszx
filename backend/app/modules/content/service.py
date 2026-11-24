@@ -17,18 +17,26 @@
 """
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import Text, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.constants import (
     COURSE_IMPORT_PREVIEW_ROWS,
     COURSE_IMPORT_TOKEN_TTL_SECONDS,
     EXPORT_MAX_ROWS,
+    IMPORT_QUESTION_MAX_ROWS,
     OTHER_SUBJECT_NAME,
     THEME_COLOR_PALETTE,
     UPLOAD_EXCEL_MAX_BYTES,
 )
-from app.common.enums import CourseSource, EnableStatus, OperationActionType
+from app.common.enums import (
+    CourseSource,
+    Difficulty,
+    EnableStatus,
+    OperationActionType,
+    QuestionStatus,
+    QuestionType,
+)
 from app.common.error_codes import ErrorCode
 from app.common.utils import to_shanghai, utc_now
 from app.core.audit import record_operation
@@ -38,11 +46,14 @@ from app.modules.content.models import (
     Course,
     CourseSubject,
     Question,
+    QuestionOption,
     Route,
     RouteItem,
     Stage,
     Subject,
 )
+from app.modules.learning.models import AnswerRecord
+from app.modules.system.models import AdminUser
 from app.modules.content.schemas import (
     CourseCreate,
     CourseQuery,
@@ -1468,3 +1479,876 @@ async def update_route_items(
     )
     await db.commit()
     return {"success": True}
+
+
+# ===================== 题库管理（04 §4.5） =====================
+
+_TYPE_CN = {1: "单选", 2: "多选", 3: "判断", 4: "简答"}
+_DIFF_CN = {1: "简单", 2: "中等", 3: "困难"}
+_TYPE_FROM_CN = {**{v: k for k, v in _TYPE_CN.items()}, "single": 1, "multiple": 2, "judge": 3, "short": 4}
+_DIFF_FROM_CN = {**{v: k for k, v in _DIFF_CN.items()}, "easy": 1, "medium": 2, "hard": 3}
+_QUESTION_TOKEN_PREFIX = "question:import:"
+_QUESTION_STEM_LIMIT = 80  # 列表题干截断长度
+
+
+def _stem(text: str, limit: int = _QUESTION_STEM_LIMIT) -> str:
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _question_visible_filter():
+    """题目可见口径（随父过滤隐藏，03 S1）：所属阶段与学科均有效。"""
+    return (
+        select(Question.id)
+        .join(Stage, Stage.id == Question.stage_id)
+        .join(Subject, Subject.id == Stage.subject_id)
+        .where(
+            Question.deleted_at.is_(None),
+            Stage.deleted_at.is_(None),
+            Subject.deleted_at.is_(None),
+        )
+    )
+
+
+def _validate_question_form(payload) -> None:
+    """按题型校验必填组合（04 §4.5）：单选/多选→选项；判断→judgeAnswer；简答→参考答案可空。"""
+    qtype = QuestionType.from_api(payload.type)
+    if qtype in (QuestionType.SINGLE, QuestionType.MULTIPLE):
+        opts = payload.options or []
+        if not 2 <= len(opts) <= 6:
+            raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "选项数量需为 2~6 项", http_status=400)
+        keys = [o.key for o in opts]
+        if len(keys) != len(set(keys)):
+            raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "选项编号不可重复", http_status=400)
+        correct = [o for o in opts if o.isCorrect]
+        if not correct:
+            raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "至少勾选 1 个正确答案", http_status=400)
+        if qtype == QuestionType.SINGLE and len(correct) > 1:
+            raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "单选题仅可有 1 个正确答案", http_status=400)
+    elif qtype == QuestionType.JUDGE and payload.judgeAnswer is None:
+        raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "判断题请设置正确答案", http_status=400)
+
+
+async def _require_question_stage(db: AsyncSession, stage_id: int) -> Stage:
+    stage = (
+        await db.execute(
+            select(Stage)
+            .join(Subject, Subject.id == Stage.subject_id)
+            .where(
+                Stage.id == stage_id,
+                Stage.deleted_at.is_(None),
+                Subject.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if stage is None:
+        raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "阶段不存在", http_status=400)
+    return stage
+
+
+async def _replace_question_options(db: AsyncSession, question_id: int, options) -> None:
+    """选项整体替换（03 S2 编辑替换）。"""
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(QuestionOption).where(QuestionOption.question_id == question_id))
+    for i, opt in enumerate(sorted(options or [], key=lambda o: o.key), start=1):
+        db.add(
+            QuestionOption(
+                question_id=question_id,
+                option_key=opt.key,
+                content=opt.content,
+                is_correct=1 if opt.isCorrect else 0,
+                sort_order=i,
+            )
+        )
+
+
+async def list_questions(db: AsyncSession, q) -> dict:
+    """题目列表（分页；题干截断）。"""
+    stmt = (
+        select(Question, Stage.name, Subject.name)
+        .join(Stage, Stage.id == Question.stage_id)
+        .join(Subject, Subject.id == Stage.subject_id)
+        .where(
+            Question.deleted_at.is_(None),
+            Stage.deleted_at.is_(None),
+            Subject.deleted_at.is_(None),
+        )
+    )
+    if q.keyword:
+        kw = f"%{q.keyword.strip()}%"
+        stmt = stmt.where(
+            Question.content.like(kw) | Question.tags.cast(Text).like(kw)  # 标签 JSON 模糊
+        )
+    if q.subjectId:
+        stmt = stmt.where(Subject.id == q.subjectId)
+    if q.stageId:
+        stmt = stmt.where(Stage.id == q.stageId)
+    if q.type and q.type != "all":
+        stmt = stmt.where(Question.type == int(QuestionType.from_api(q.type)))
+    if q.difficulty and q.difficulty != "all":
+        stmt = stmt.where(Question.difficulty == int(Difficulty.from_api(q.difficulty)))
+    if q.status and q.status != "all":
+        stmt = stmt.where(Question.status == int(QuestionStatus.from_api(q.status)))
+
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = (
+        await db.execute(stmt.order_by(Question.id.desc()).offset(q.offset).limit(q.limit))
+    ).all()
+
+    return {
+        "list": [
+            {
+                "id": item.id,
+                "content": _stem(item.content),
+                "subjectName": subject_name,
+                "stageName": stage_name,
+                "type": QuestionType(item.type).api,
+                "difficulty": Difficulty(item.difficulty).api,
+                "status": QuestionStatus(item.status).api,
+                "createdAt": to_shanghai(item.created_at),
+            }
+            for item, stage_name, subject_name in rows
+        ],
+        "total": total,
+        "pageNum": q.pageNum,
+        "pageSize": q.pageSize,
+    }
+
+
+async def question_summary(db: AsyncSession) -> dict:
+    """统计卡（需求 4.3.3 七卡）：与列表同口径（有效题目，随父过滤）。"""
+    visible = _question_visible_filter()
+    rows = (
+        await db.execute(
+            select(Question.type, Question.status, func.count())
+            .where(Question.id.in_(visible))
+            .group_by(Question.type, Question.status)
+        )
+    ).all()
+    summary = {"total": 0, "onShelf": 0, "pending": 0, "single": 0, "multiple": 0, "judge": 0, "short": 0}
+    type_key = {1: "single", 2: "multiple", 3: "judge", 4: "short"}
+    for qtype, status, cnt in rows:
+        summary["total"] += cnt
+        summary[type_key[qtype]] += cnt
+        if status == int(QuestionStatus.ON_SHELF):
+            summary["onShelf"] += cnt
+        elif status == int(QuestionStatus.PENDING):
+            summary["pending"] += cnt
+    return summary
+
+
+async def get_question_detail(db: AsyncSession, question_id: int) -> dict:
+    row = (
+        await db.execute(
+            select(Question, Stage.name, Subject.name)
+            .join(Stage, Stage.id == Question.stage_id)
+            .join(Subject, Subject.id == Stage.subject_id)
+            .where(
+                Question.id == question_id,
+                Question.deleted_at.is_(None),
+                Stage.deleted_at.is_(None),
+                Subject.deleted_at.is_(None),
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        raise BizError(ErrorCode.RESOURCE_NOT_FOUND, "题目不存在", http_status=404)
+    item, stage_name, subject_name = row
+
+    options = list(
+        (
+            await db.execute(
+                select(QuestionOption)
+                .where(QuestionOption.question_id == item.id)
+                .order_by(QuestionOption.sort_order, QuestionOption.id)
+            )
+        ).scalars()
+    )
+    answer_agg = (
+        await db.execute(
+            select(func.count(AnswerRecord.id), func.coalesce(func.sum(AnswerRecord.is_correct), 0))
+            .where(AnswerRecord.question_id == item.id)
+        )
+    ).one()
+    answer_count, correct_count = answer_agg[0], int(answer_agg[1] or 0)
+    created_by = None
+    if item.created_by:
+        created_by = (
+            await db.execute(
+                select(AdminUser.username).where(AdminUser.id == item.created_by)
+            )
+        ).scalar()
+
+    return {
+        "id": item.id,
+        "stageId": item.stage_id,
+        "subjectName": subject_name,
+        "stageName": stage_name,
+        "type": QuestionType(item.type).api,
+        "difficulty": Difficulty(item.difficulty).api,
+        "content": item.content,
+        "tags": item.tags or [],
+        "analysis": item.analysis,
+        "options": [
+            {"key": o.option_key, "content": o.content, "isCorrect": o.is_correct == 1} for o in options
+        ],
+        "judgeAnswer": (
+            None if item.judge_answer is None else bool(item.judge_answer)
+        ),
+        "referenceAnswer": item.reference_answer,
+        "status": QuestionStatus(item.status).api,
+        "createdAt": to_shanghai(item.created_at),
+        "createdBy": created_by,
+        "stats": {
+            "answerCount": answer_count,
+            "correctCount": correct_count,
+            "accuracy": round(correct_count / answer_count * 100, 1) if answer_count else 0.0,
+        },
+    }
+
+
+async def create_question(db: AsyncSession, ctx: AdminContext, payload, ip: str) -> dict:
+    _validate_question_form(payload)
+    stage = await _require_question_stage(db, payload.stageId)
+
+    question = Question(
+        stage_id=stage.id,
+        type=int(QuestionType.from_api(payload.type)),
+        difficulty=int(Difficulty.from_api(payload.difficulty)),
+        status=int(QuestionStatus.PENDING),  # 新增直入「待审核」
+        content=payload.content,
+        judge_answer=(
+            None if payload.judgeAnswer is None else int(payload.judgeAnswer)
+        ),
+        reference_answer=payload.referenceAnswer,
+        analysis=payload.analysis,
+        tags=[t.strip() for t in payload.tags if t.strip()] or None,
+        created_by=ctx.admin_id,
+    )
+    db.add(question)
+    await db.flush()
+    await _replace_question_options(db, question.id, payload.options)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.CREATE,
+        action_desc="新增题目",
+        target=f"题目 #{question.id}",
+        detail=_stem(payload.content, 50),
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"id": question.id}
+
+
+async def _require_question(db: AsyncSession, question_id: int) -> Question:
+    question = (
+        await db.execute(
+            select(Question).where(Question.id == question_id, Question.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if question is None:
+        raise BizError(ErrorCode.RESOURCE_NOT_FOUND, "题目不存在", http_status=404)
+    return question
+
+
+async def update_question(
+    db: AsyncSession, ctx: AdminContext, question_id: int, payload, ip: str
+) -> dict:
+    question = await _require_question(db, question_id)
+    _validate_question_form(payload)
+    stage = await _require_question_stage(db, payload.stageId)
+
+    # 全量替换（status 只读不接收）；已驳回题目的状态保持，由「重新提交」回待审核
+    question.stage_id = stage.id
+    question.type = int(QuestionType.from_api(payload.type))
+    question.difficulty = int(Difficulty.from_api(payload.difficulty))
+    question.content = payload.content
+    question.judge_answer = None if payload.judgeAnswer is None else int(payload.judgeAnswer)
+    question.reference_answer = payload.referenceAnswer
+    question.analysis = payload.analysis
+    question.tags = [t.strip() for t in payload.tags if t.strip()] or None
+    await _replace_question_options(db, question.id, payload.options)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="编辑题目",
+        target=f"题目 #{question.id}",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"success": True}
+
+
+async def delete_question(db: AsyncSession, ctx: AdminContext, question_id: int, ip: str) -> dict:
+    question = await _require_question(db, question_id)
+    question.deleted_at = utc_now()  # 逻辑删除（作答记录保留，统计不失真）
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.DELETE,
+        action_desc="删除题目",
+        target=f"题目 #{question.id}",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"success": True}
+
+
+async def review_question(
+    db: AsyncSession, ctx: AdminContext, question_id: int, payload, ip: str
+) -> dict:
+    """审核（04 §4.5）：仅「待审核」可审；pass→已上架、reject→已驳回。"""
+    question = await _require_question(db, question_id)
+    if question.status != int(QuestionStatus.PENDING):
+        raise BizError(ErrorCode.BIZ_STATE_INVALID, "仅待审核题目可审核", http_status=409)
+    passed = payload.result == "pass"
+    question.status = int(QuestionStatus.ON_SHELF if passed else QuestionStatus.REJECTED)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc=f"审核题目（{'通过' if passed else '不通过'}）",
+        target=f"题目 #{question.id}",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"status": QuestionStatus(question.status).api}
+
+
+async def submit_question(
+    db: AsyncSession, ctx: AdminContext, question_id: int, ip: str
+) -> dict:
+    """重新提交/上架（口径 S14）：已驳回/已下架 → 待审核。"""
+    question = await _require_question(db, question_id)
+    if question.status not in (int(QuestionStatus.REJECTED), int(QuestionStatus.OFF_SHELF)):
+        raise BizError(ErrorCode.BIZ_STATE_INVALID, "仅已驳回/已下架题目可提交审核", http_status=409)
+    question.status = int(QuestionStatus.PENDING)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="提交审核",
+        target=f"题目 #{question.id}",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"status": "pending"}
+
+
+async def unpublish_question(
+    db: AsyncSession, ctx: AdminContext, question_id: int, ip: str
+) -> dict:
+    """下架：仅已上架可下架。"""
+    question = await _require_question(db, question_id)
+    if question.status != int(QuestionStatus.ON_SHELF):
+        raise BizError(ErrorCode.BIZ_STATE_INVALID, "仅已上架题目可下架", http_status=409)
+    question.status = int(QuestionStatus.OFF_SHELF)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="下架题目",
+        target=f"题目 #{question.id}",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"status": "offShelf"}
+
+
+async def batch_review_questions(
+    db: AsyncSession, ctx: AdminContext, payload, ip: str
+) -> dict:
+    """批量审核：仅「待审核」可审，其余跳过并回传 skipped；pass→已上架、reject→已驳回。"""
+    rows = list(
+        (
+            await db.execute(
+                select(Question).where(
+                    Question.id.in_(payload.ids), Question.deleted_at.is_(None)
+                )
+            )
+        ).scalars()
+    )
+    by_id = {q.id: q for q in rows}
+    affected = 0
+    skipped: list[int] = []
+    for qid in payload.ids:
+        question = by_id.get(qid)
+        if question is None or question.status != int(QuestionStatus.PENDING):
+            skipped.append(qid)
+            continue
+        question.status = int(
+            QuestionStatus.ON_SHELF if payload.result == "pass" else QuestionStatus.REJECTED
+        )
+        affected += 1
+
+    passed = payload.result == "pass"
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc=f"批量审核（{'通过' if passed else '不通过'}）",
+        target=f"{len(payload.ids)} 道题目",
+        detail=f"成功 {affected} 道、跳过 {len(skipped)} 道",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"affected": affected, "skipped": skipped}
+
+
+async def batch_status_questions(
+    db: AsyncSession, ctx: AdminContext, payload, ip: str
+) -> dict:
+    """批量状态（口径 S15）：逐条校验合法性，不合法条目跳过并回传 skipped。"""
+    rows = list(
+        (
+            await db.execute(
+                select(Question).where(
+                    Question.id.in_(payload.ids), Question.deleted_at.is_(None)
+                )
+            )
+        ).scalars()
+    )
+    by_id = {q.id: q for q in rows}
+    affected = 0
+    skipped: list[int] = []
+    for qid in payload.ids:
+        question = by_id.get(qid)
+        if question is None:
+            skipped.append(qid)
+            continue
+        if payload.action == "submit" and question.status in (
+            int(QuestionStatus.REJECTED),
+            int(QuestionStatus.OFF_SHELF),
+        ):
+            question.status = int(QuestionStatus.PENDING)
+            affected += 1
+        elif payload.action == "unpublish" and question.status == int(QuestionStatus.ON_SHELF):
+            question.status = int(QuestionStatus.OFF_SHELF)
+            affected += 1
+        else:
+            skipped.append(qid)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="批量上架" if payload.action == "submit" else "批量下架",
+        target=f"{len(payload.ids)} 道题目",
+        detail=f"成功 {affected} 道、跳过 {len(skipped)} 道",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"affected": affected, "skipped": skipped}
+
+
+async def batch_delete_questions(
+    db: AsyncSession, ctx: AdminContext, payload, ip: str
+) -> dict:
+    rows = list(
+        (
+            await db.execute(
+                select(Question).where(
+                    Question.id.in_(payload.ids), Question.deleted_at.is_(None)
+                )
+            )
+        ).scalars()
+    )
+    now = utc_now()
+    for question in rows:
+        question.deleted_at = now
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.DELETE,
+        action_desc="批量删除题目",
+        target=f"{len(rows)} 道题目",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"affected": len(rows)}
+
+
+# ---------- 批量导入（两段式，同 §4.4 口径） ----------
+
+_QUESTION_REQUIRED_COLS = ("学科", "阶段", "题干", "题型", "难度", "正确答案")
+_QUESTION_OPTIONAL_COLS = ("选项A", "选项B", "选项C", "选项D", "选项E", "选项F", "解析", "标签")
+_QUESTION_TEMPLATE_HEADERS = [
+    "学科", "阶段", "题干", "题型", "难度",
+    "选项A", "选项B", "选项C", "选项D", "选项E", "选项F",
+    "正确答案", "解析", "标签",
+]
+
+
+def _parse_correct_letters(raw: str, valid_keys: set[str], single: bool) -> list[str]:
+    letters = [ch.upper() for ch in raw if ch.upper() in "ABCDEF"]
+    letters = list(dict.fromkeys(letters))
+    if not letters or any(k not in valid_keys for k in letters):
+        raise ValueError("正确答案与选项不匹配")
+    if single and len(letters) != 1:
+        raise ValueError("单选题正确答案须为 1 个选项")
+    return letters
+
+
+async def preview_question_import(
+    db: AsyncSession, r: aioredis.Redis, data: bytes, filename: str
+) -> dict:
+    """导入预览（04 §4.5）：任一无效行整份拒绝；阶段按「学科+阶段」两级定位。"""
+    if len(data) > UPLOAD_EXCEL_MAX_BYTES:
+        raise BizError(ErrorCode.PARAM_FILE_INVALID, "文件超过 5MB 限制", http_status=400)
+
+    sheet = _read_sheet(data, filename or "")
+    if not sheet:
+        raise BizError(ErrorCode.PARAM_FILE_INVALID, "文件内容为空", http_status=400)
+
+    header = [_cell_str(h) for h in sheet[0]]
+    all_cols = _QUESTION_REQUIRED_COLS + _QUESTION_OPTIONAL_COLS
+    col_index = {name: header.index(name) for name in all_cols if name in header}
+    missing = [name for name in _QUESTION_REQUIRED_COLS if name not in col_index]
+    if missing:
+        return _import_rejected(0, f"缺少必需列：{'、'.join(missing)}")
+
+    data_rows = sheet[1:]
+    if not data_rows:
+        return _import_rejected(0, "文件无数据行")
+    if len(data_rows) > IMPORT_QUESTION_MAX_ROWS:
+        return _import_rejected(0, f"超过单次 {IMPORT_QUESTION_MAX_ROWS} 题上限")
+
+    # （学科名, 阶段名）→ stage_id（仅有效层级）
+    stage_rows = (
+        await db.execute(
+            select(Stage.id, Stage.name, Subject.name)
+            .join(Subject, Subject.id == Stage.subject_id)
+            .where(Stage.deleted_at.is_(None), Subject.deleted_at.is_(None))
+        )
+    ).all()
+    stage_map: dict[tuple[str, str], int] = {(sn, stn): sid for sid, stn, sn in stage_rows}
+
+    def cell(row: list[str], col: str) -> str:
+        idx = col_index.get(col)
+        return row[idx].strip() if idx is not None and idx < len(row) else ""
+
+    errors: list[dict] = []
+    parsed: list[dict] = []
+
+    for offset, row in enumerate(data_rows):
+        row_no = offset + 2
+        subject_name = cell(row, "学科")
+        stage_name = cell(row, "阶段")
+        stage_id = stage_map.get((subject_name, stage_name))
+        if stage_id is None:
+            errors.append({"rowNo": row_no, "reason": f"所属学科/阶段不存在「{subject_name} / {stage_name}」"})
+            continue
+
+        content = cell(row, "题干")
+        if not content:
+            errors.append({"rowNo": row_no, "reason": "题干缺失"})
+            continue
+        if len(content) > 5000:
+            errors.append({"rowNo": row_no, "reason": "题干超过 5000 字"})
+            continue
+
+        qtype = _TYPE_FROM_CN.get(cell(row, "题型"))
+        if qtype is None:
+            errors.append({"rowNo": row_no, "reason": f"题型无效「{cell(row, '题型')}」（单选/多选/判断/简答）"})
+            continue
+        difficulty = _DIFF_FROM_CN.get(cell(row, "难度"))
+        if difficulty is None:
+            errors.append({"rowNo": row_no, "reason": f"难度无效「{cell(row, '难度')}」（简单/中等/困难）"})
+            continue
+
+        analysis = cell(row, "解析") or None
+        if analysis and len(analysis) > 5000:
+            errors.append({"rowNo": row_no, "reason": "解析超过 5000 字"})
+            continue
+        tags = [t.strip() for t in re.split(r"[，,、]", cell(row, "标签")) if t.strip()]
+        if len(tags) > 10:
+            errors.append({"rowNo": row_no, "reason": "标签超过 10 个"})
+            continue
+
+        options: list[dict] = []
+        judge_answer = None
+        reference_answer = None
+        try:
+            if qtype in (1, 2):  # 单选/多选：选项 A~F + 正确答案字母
+                for letter in "ABCDEF":
+                    text = cell(row, f"选项{letter}")
+                    if text:
+                        options.append({"key": letter, "content": text[:500], "isCorrect": False})
+                if not 2 <= len(options) <= 6:
+                    raise ValueError("选项数量需为 2~6 项")
+                letters = _parse_correct_letters(
+                    cell(row, "正确答案"), {o["key"] for o in options}, single=(qtype == 1)
+                )
+                for o in options:
+                    o["isCorrect"] = o["key"] in letters
+            elif qtype == 3:  # 判断
+                ans = cell(row, "正确答案")
+                if ans in ("正确", "对", "T", "t", "true", "True"):
+                    judge_answer = 1
+                elif ans in ("错误", "错", "F", "f", "false", "False"):
+                    judge_answer = 0
+                else:
+                    raise ValueError(f"判断题正确答案无效「{ans}」（正确/错误）")
+            else:  # 简答：参考答案可空
+                reference_answer = cell(row, "正确答案") or None
+                if reference_answer and len(reference_answer) > 5000:
+                    raise ValueError("参考答案超过 5000 字")
+        except ValueError as exc:
+            errors.append({"rowNo": row_no, "reason": str(exc)})
+            continue
+
+        parsed.append(
+            {
+                "stageId": stage_id,
+                "type": qtype,
+                "difficulty": difficulty,
+                "content": content,
+                "tags": tags,
+                "analysis": analysis,
+                "options": options,
+                "judgeAnswer": judge_answer,
+                "referenceAnswer": reference_answer,
+                "subjectName": subject_name,
+                "stageName": stage_name,
+            }
+        )
+
+    if errors:
+        return {
+            "importToken": "",
+            "summary": {
+                "totalRows": len(data_rows),
+                "newCount": 0,
+                "updateCount": 0,
+                "warningCount": 0,
+                "errorCount": len(errors),
+            },
+            "errors": errors,
+            "warnings": [],
+            "rows": [],
+        }
+
+    token = secrets.token_urlsafe(24)
+    await r.set(
+        _QUESTION_TOKEN_PREFIX + token,
+        json.dumps({"rows": parsed}, ensure_ascii=False),
+        ex=COURSE_IMPORT_TOKEN_TTL_SECONDS,
+    )
+    return {
+        "importToken": token,
+        "summary": {
+            "totalRows": len(data_rows),
+            "newCount": len(parsed),  # 导入即「待审核」，均为新增
+            "updateCount": 0,
+            "warningCount": 0,
+            "errorCount": 0,
+        },
+        "errors": [],
+        "warnings": [],
+        "rows": [
+            {
+                "rowNo": i + 2,
+                "content": _stem(it["content"]),
+                "subjectName": it["subjectName"],
+                "stageName": it["stageName"],
+                "type": QuestionType(it["type"]).api,
+                "difficulty": Difficulty(it["difficulty"]).api,
+            }
+            for i, it in enumerate(parsed[:COURSE_IMPORT_PREVIEW_ROWS])
+        ],
+    }
+
+
+async def confirm_question_import(
+    db: AsyncSession, r: aioredis.Redis, payload, ctx: AdminContext, ip: str
+) -> dict:
+    """确认导入：逐行入库（状态=待审核，选项随行写入）。"""
+    raw = await r.get(_QUESTION_TOKEN_PREFIX + payload.importToken)
+    if not raw:
+        raise BizError(
+            ErrorCode.PARAM_VALIDATION_FAILED, "importToken 无效或已过期，请重新上传", http_status=400
+        )
+    await r.delete(_QUESTION_TOKEN_PREFIX + payload.importToken)
+    rows: list[dict] = json.loads(raw)["rows"]
+
+    created = 0
+    for item in rows:
+        question = Question(
+            stage_id=item["stageId"],
+            type=item["type"],
+            difficulty=item["difficulty"],
+            status=int(QuestionStatus.PENDING),  # 导入即「待审核」
+            content=item["content"],
+            judge_answer=item["judgeAnswer"],
+            reference_answer=item["referenceAnswer"],
+            analysis=item["analysis"],
+            tags=item["tags"] or None,
+            created_by=ctx.admin_id,
+        )
+        db.add(question)
+        await db.flush()
+        for i, opt in enumerate(item["options"], start=1):
+            db.add(
+                QuestionOption(
+                    question_id=question.id,
+                    option_key=opt["key"],
+                    content=opt["content"],
+                    is_correct=1 if opt["isCorrect"] else 0,
+                    sort_order=i,
+                )
+            )
+        created += 1
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.CREATE,
+        action_desc="批量导入题目",
+        target="题库",
+        detail=f"导入 {created} 道（待审核）",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"created": created, "updated": 0}
+
+
+def build_question_import_template() -> bytes:
+    """导入模板：14 列、四种题型各 1 行示例（需求 4.3.3）。"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(_QUESTION_TEMPLATE_HEADERS)
+    ws.append([
+        "AI应用与智能体开发", "大模型基础", "下列关于大语言模型的描述，正确的是？", "单选", "简单",
+        "LLM 只能处理英文文本", "LLM 通过海量文本预训练学习语言规律", "LLM 参数量越小效果越好", "LLM 无需微调即可用于所有场景", "", "",
+        "B", "大语言模型通过海量文本预训练学习语言规律。", "大模型,基础概念",
+    ])
+    ws.append([
+        "AI应用与智能体开发", "Agent 开发", "以下哪些属于 AI Agent 的核心组成部分？", "多选", "中等",
+        "规划（Planning）", "记忆（Memory）", "工具使用（Tool Use）", "硬盘分区", "", "",
+        "ABC", "Agent 由规划、记忆、工具使用与大模型核心组成。", "Agent",
+    ])
+    ws.append([
+        "AI应用与智能体开发", "大模型基础", "一个汉字一定只对应一个 Token。", "判断", "简单",
+        "", "", "", "", "", "",
+        "错误", "Token 切分取决于分词器与语料。", "Token",
+    ])
+    ws.append([
+        "AI应用与智能体开发", "项目实战", "请简述 RAG 的原理，并说明它解决了大模型的哪些问题。", "简答", "困难",
+        "", "", "", "", "", "",
+        "RAG 在生成前先检索外部知识库，将片段注入 Prompt 再生成答案。", "RAG 将检索与生成结合，缓解幻觉与知识过时。", "RAG",
+    ])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def export_questions_xlsx(
+    db: AsyncSession, ctx: AdminContext, q, ip: str
+) -> tuple[str, bytes, bool]:
+    """导出题目（04 §4.5）：14 列与导入表头一致、可回灌；单次 ≤1 万行，超出截断（S16）。"""
+    stmt = (
+        select(Question, Stage, Subject)
+        .join(Stage, Stage.id == Question.stage_id)
+        .join(Subject, Subject.id == Stage.subject_id)
+        .where(
+            Question.deleted_at.is_(None),
+            Stage.deleted_at.is_(None),
+            Subject.deleted_at.is_(None),
+        )
+    )
+    if q.keyword:
+        kw = f"%{q.keyword.strip()}%"
+        stmt = stmt.where(Question.content.like(kw) | Question.tags.cast(Text).like(kw))
+    if q.subjectId:
+        stmt = stmt.where(Subject.id == q.subjectId)
+    if q.stageId:
+        stmt = stmt.where(Stage.id == q.stageId)
+    if q.type and q.type != "all":
+        stmt = stmt.where(Question.type == int(QuestionType.from_api(q.type)))
+    if q.difficulty and q.difficulty != "all":
+        stmt = stmt.where(Question.difficulty == int(Difficulty.from_api(q.difficulty)))
+    if q.status and q.status != "all":
+        stmt = stmt.where(Question.status == int(QuestionStatus.from_api(q.status)))
+
+    matched = (
+        await db.execute(select(func.count()).select_from(stmt.subquery()))
+    ).scalar() or 0
+    rows = (await db.execute(stmt.order_by(Question.id))).all()[:EXPORT_MAX_ROWS]
+    truncated = matched > EXPORT_MAX_ROWS
+
+    question_ids = [item.id for item, _, _ in rows]
+    opt_map: dict[int, list[QuestionOption]] = {}
+    if question_ids:
+        for opt in (
+            await db.execute(
+                select(QuestionOption)
+                .where(QuestionOption.question_id.in_(question_ids))
+                .order_by(QuestionOption.question_id, QuestionOption.sort_order, QuestionOption.id)
+            )
+        ).scalars():
+            opt_map.setdefault(opt.question_id, []).append(opt)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "题库导出"
+    ws.append(_QUESTION_TEMPLATE_HEADERS)
+    for item, stage, subject in rows:
+        options = opt_map.get(item.id, [])
+        opt_cells = [""] * 6
+        correct_letters = ""
+        for i, opt in enumerate(options[:6]):
+            opt_cells[i] = opt.content
+            if opt.is_correct == 1:
+                correct_letters += opt.option_key
+        if item.type == int(QuestionType.JUDGE):
+            correct_letters = "正确" if item.judge_answer == 1 else "错误"
+        elif item.type == int(QuestionType.SHORT):
+            correct_letters = item.reference_answer or ""
+        ws.append(
+            [
+                subject.name,
+                stage.name,
+                item.content,
+                _TYPE_CN[item.type],
+                _DIFF_CN[item.difficulty],
+                *opt_cells,
+                correct_letters,
+                item.analysis or "",
+                ",".join(item.tags or []),
+            ]
+        )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.OTHER,
+        action_desc="导出题目",
+        target="题库",
+        detail=f"导出 {len(rows)} 道" + ("（已截断）" if truncated else ""),
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return "questions.xlsx", buf.getvalue(), truncated

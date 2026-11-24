@@ -257,3 +257,121 @@ class RouteItemsAdd(BaseModel):
 
 class RouteItemsUpdate(BaseModel):
     courseIds: list[int] = Field(description="有序全量数组，未含即移除")
+
+
+# ---------- 题库管理（04 §4.5）----------
+
+class QuestionQuery(PageQuery):
+    keyword: Optional[str] = Field(default=None, max_length=200, description="题干/标签模糊")
+    subjectId: Optional[int] = Field(default=None, ge=1)
+    stageId: Optional[int] = Field(default=None, ge=1)
+    type: Optional[str] = Field(default="all", pattern="^(all|single|multiple|judge|short)$")
+    difficulty: Optional[str] = Field(default="all", pattern="^(all|easy|medium|hard)$")
+    status: Optional[str] = Field(
+        default="all", pattern="^(all|onShelf|offShelf|pending|draft|rejected)$"
+    )
+
+
+class QuestionListItem(BaseModel):
+    id: int
+    content: str  # 题干截断
+    subjectName: str
+    stageName: str
+    type: str  # single | multiple | judge | short
+    difficulty: str  # easy | medium | hard
+    status: str
+    createdAt: str
+
+
+class QuestionSummary(BaseModel):
+    total: int
+    onShelf: int
+    pending: int
+    single: int
+    multiple: int
+    judge: int
+    short: int
+
+
+class QuestionOptionIn(BaseModel):
+    key: str = Field(pattern="^[A-F]$")
+    content: str = Field(min_length=1, max_length=500)
+    isCorrect: bool
+
+
+class QuestionCreate(BaseModel):
+    stageId: int = Field(ge=1)
+    type: str = Field(pattern="^(single|multiple|judge|short)$")
+    difficulty: str = Field(pattern="^(easy|medium|hard)$")
+    content: str = Field(min_length=1, max_length=5000)
+    tags: list[str] = Field(default_factory=list, max_length=10, description="≤10 个标签")
+    analysis: Optional[str] = Field(default=None, max_length=5000)
+    options: Optional[list[QuestionOptionIn]] = Field(
+        default=None, description="单选/多选：2~6 项，至少 1 个正确"
+    )
+    judgeAnswer: Optional[bool] = Field(default=None, description="判断题正确答案")
+    referenceAnswer: Optional[str] = Field(default=None, max_length=5000, description="简答题参考答案（可空）")
+
+
+class QuestionUpdate(QuestionCreate):
+    """编辑题目（同新增全量；status 只读不接收）。"""
+
+
+class QuestionOptionOut(BaseModel):
+    key: str
+    content: str
+    isCorrect: bool
+
+
+class QuestionStats(BaseModel):
+    answerCount: int
+    correctCount: int
+    accuracy: float  # 百分比，1 位小数
+
+
+class QuestionDetail(BaseModel):
+    id: int
+    stageId: int
+    subjectName: str
+    stageName: str
+    type: str
+    difficulty: str
+    content: str
+    tags: list[str]
+    analysis: Optional[str] = None
+    options: list[QuestionOptionOut]
+    judgeAnswer: Optional[bool] = None
+    referenceAnswer: Optional[str] = None
+    status: str
+    createdAt: str
+    createdBy: Optional[str] = None
+    stats: QuestionStats
+
+
+class QuestionReview(BaseModel):
+    result: str = Field(pattern="^(pass|reject)$")
+
+
+class QuestionBatchStatus(BaseModel):
+    action: str = Field(pattern="^(submit|unpublish)$")
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class QuestionBatchReview(BaseModel):
+    """批量审核（仅待审核可审，不合法条目跳过并回传 skipped）。"""
+
+    result: str = Field(pattern="^(pass|reject)$")
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class QuestionBatchDelete(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class QuestionImportPreviewRow(BaseModel):
+    rowNo: int
+    content: str  # 题干截断
+    subjectName: str
+    stageName: str
+    type: str
+    difficulty: str

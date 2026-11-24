@@ -23,8 +23,12 @@ instance.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 instance.interceptors.response.use(
   (response) => {
-    // 文件流（导出 CSV/xlsx）直接透传
+    // 文件流（导出 CSV/xlsx）直接透传；附加响应头（如 X-Truncated）供导出提示
     if (response.config.responseType === 'blob') {
+      Object.defineProperty(response.data, '__headers', {
+        value: response.headers,
+        enumerable: false,
+      })
       return response.data as never
     }
     const body = response.data as ApiResponse | ApiError

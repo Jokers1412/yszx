@@ -21,6 +21,13 @@ from app.modules.content.schemas import (
     CourseQuery,
     CourseUpdate,
     ImportConfirmRequest,
+    QuestionBatchDelete,
+    QuestionBatchReview,
+    QuestionBatchStatus,
+    QuestionCreate,
+    QuestionQuery,
+    QuestionReview,
+    QuestionUpdate,
     RouteCreate,
     RouteItemsAdd,
     RouteItemsUpdate,
@@ -335,3 +342,191 @@ async def update_route_items(
 ):
     """课程排序/移除（有序全量，整体替换）。"""
     return ok(await service.update_route_items(db, ctx, route_id, payload, ip=_client_ip(request)))
+
+
+# ===================== 管理端 · 题库管理（04 §4.5） =====================
+
+@admin_router.get("/questions")
+async def list_questions(
+    q: QuestionQuery = Depends(),
+    _ctx: AdminContext = Depends(require_perm("question:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """题目列表（筛选 + 分页，题干截断）。"""
+    return ok(await service.list_questions(db, q))
+
+
+@admin_router.get("/questions/summary")
+async def question_summary(
+    _ctx: AdminContext = Depends(require_perm("question:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """统计卡（需求 4.3.3 七卡）。"""
+    return ok(await service.question_summary(db))
+
+
+@admin_router.get("/questions/export")
+async def export_questions(
+    request: Request,
+    q: QuestionQuery = Depends(),
+    ctx: AdminContext = Depends(require_perm("question:export")),
+    db: AsyncSession = Depends(get_db),
+):
+    """导出题目（14 列与导入表头一致可回灌；超出 1 万行截断，X-Truncated 头标识）。"""
+    filename, data, truncated = await service.export_questions_xlsx(db, ctx, q, ip=_client_ip(request))
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "X-Truncated": "true" if truncated else "false",
+        },
+    )
+
+
+@admin_router.get("/questions/import/template")
+async def download_question_import_template(
+    _ctx: AdminContext = Depends(require_perm("question:import")),
+):
+    """下载导入模板（.xlsx，四种题型各 1 行示例）。"""
+    data = service.build_question_import_template()
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=question-import-template.xlsx"},
+    )
+
+
+@admin_router.post("/questions/import/preview")
+async def preview_question_import(
+    file: UploadFile = File(...),
+    _ctx: AdminContext = Depends(require_perm("question:import")),
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+):
+    """导入预览（任一无效行整份拒绝；阶段按「学科+阶段」两级定位）。"""
+    data = await file.read()
+    return ok(await service.preview_question_import(db, r, data, file.filename or ""))
+
+
+@admin_router.post("/questions/import")
+async def confirm_question_import(
+    payload: ImportConfirmRequest,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:import")),
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+):
+    """确认导入（逐行入库，状态=待审核）。"""
+    return ok(await service.confirm_question_import(db, r, payload, ctx, ip=_client_ip(request)))
+
+
+@admin_router.post("/questions/batch-review")
+async def batch_review_questions(
+    payload: QuestionBatchReview,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:review")),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量审核（仅待审核可审；不合法条目跳过并回传 skipped）。"""
+    return ok(await service.batch_review_questions(db, ctx, payload, ip=_client_ip(request)))
+
+
+@admin_router.post("/questions/batch-status")
+async def batch_status_questions(
+    payload: QuestionBatchStatus,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量上架/下架（不合法条目跳过并回传 skipped，口径 S15）。"""
+    return ok(await service.batch_status_questions(db, ctx, payload, ip=_client_ip(request)))
+
+
+@admin_router.post("/questions/batch-delete")
+async def batch_delete_questions(
+    payload: QuestionBatchDelete,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量删除（逻辑删除整批原子）。"""
+    return ok(await service.batch_delete_questions(db, ctx, payload, ip=_client_ip(request)))
+
+
+@admin_router.post("/questions", status_code=201)
+async def create_question(
+    payload: QuestionCreate,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """新增题目（按题型校验必填组合；直入「待审核」）。"""
+    return ok(await service.create_question(db, ctx, payload, ip=_client_ip(request)))
+
+
+@admin_router.get("/questions/{question_id}")
+async def get_question(
+    question_id: int,
+    _ctx: AdminContext = Depends(require_perm("question:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """题目详情（含选项与答题统计）。"""
+    return ok(await service.get_question_detail(db, question_id))
+
+
+@admin_router.put("/questions/{question_id}")
+async def update_question(
+    question_id: int,
+    payload: QuestionUpdate,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """编辑题目（全量替换；选项整体替换；status 只读）。"""
+    return ok(await service.update_question(db, ctx, question_id, payload, ip=_client_ip(request)))
+
+
+@admin_router.delete("/questions/{question_id}")
+async def delete_question(
+    question_id: int,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除题目（逻辑删除，作答记录保留）。"""
+    return ok(await service.delete_question(db, ctx, question_id, ip=_client_ip(request)))
+
+
+@admin_router.post("/questions/{question_id}/review")
+async def review_question(
+    question_id: int,
+    payload: QuestionReview,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:review")),
+    db: AsyncSession = Depends(get_db),
+):
+    """审核（仅待审核可审；pass→已上架、reject→已驳回）。"""
+    return ok(await service.review_question(db, ctx, question_id, payload, ip=_client_ip(request)))
+
+
+@admin_router.post("/questions/{question_id}/submit")
+async def submit_question(
+    question_id: int,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """重新提交/上架（已驳回/已下架 → 待审核，口径 S14）。"""
+    return ok(await service.submit_question(db, ctx, question_id, ip=_client_ip(request)))
+
+
+@admin_router.post("/questions/{question_id}/unpublish")
+async def unpublish_question(
+    question_id: int,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("question:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """下架（仅已上架可下架）。"""
+    return ok(await service.unpublish_question(db, ctx, question_id, ip=_client_ip(request)))

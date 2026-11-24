@@ -114,6 +114,7 @@
 /* ---------- 表格操作列：单行展示、紧凑间距 ---------- */
 .el-table .actions-cell .cell {
   white-space: nowrap;
+  padding: 0 8px;
 }
 .el-table .actions-cell .el-button {
   padding-left: 4px;
