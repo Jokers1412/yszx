@@ -1,4 +1,4 @@
-"""content 业务服务（04 §4.3 学科管理已实现；课程/题目/路线后续补充）。
+"""content 业务服务（04 §4.3 学科管理、§4.4 B站课程库已实现；题目/路线后续补充）。
 
 职责：学科/阶段维护、课程库（多对多学科、bvid 唯一、导入覆盖语义）、
 题目状态流转与审核（严格流转图）、面试题库（来源标记 Excel 文件名+行号）、
@@ -8,21 +8,46 @@
   - 计数按有效行过滤（deleted_at IS NULL），题目经所属阶段归属学科（03 §5.1）；
   - 删除不级联（03 S1）：仅标记父行，子级随父过滤隐藏；
   - 排序号 sort_order 1 起连续重排（越小越靠前），新增/编辑的 sortOrder 为目标位置。
+
+课程库口径：
+  - 列表顺序（03 §5.2 S5 / 需求 4.3.2）：sort_seq 升序 = 导入批次（批次先后+Excel 行序）
+    在前、非导入（种子/手动）在后且最新在前（手动新增取当前最小序值-1）；
+  - 导入两段式（04 §4.4）：preview 解析缓存 importToken（Redis TTL），confirm 全量落库；
+    Excel 为权威数据源、覆盖更新（bvid > 名称+来源 匹配）、关联学科整体替换（03 S2）。
 """
 from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.constants import THEME_COLOR_PALETTE
-from app.common.enums import EnableStatus, OperationActionType
+from app.common.constants import (
+    COURSE_IMPORT_PREVIEW_ROWS,
+    COURSE_IMPORT_TOKEN_TTL_SECONDS,
+    EXPORT_MAX_ROWS,
+    OTHER_SUBJECT_NAME,
+    THEME_COLOR_PALETTE,
+    UPLOAD_EXCEL_MAX_BYTES,
+)
+from app.common.enums import CourseSource, EnableStatus, OperationActionType
 from app.common.error_codes import ErrorCode
-from app.common.utils import utc_now
+from app.common.utils import to_shanghai, utc_now
 from app.core.audit import record_operation
 from app.core.context import AdminContext
 from app.core.exceptions import BizError
-from app.modules.content.models import Course, CourseSubject, Question, Route, Stage, Subject
+from app.modules.content.models import (
+    Course,
+    CourseSubject,
+    Question,
+    Route,
+    RouteItem,
+    Stage,
+    Subject,
+)
 from app.modules.content.schemas import (
+    CourseCreate,
+    CourseQuery,
+    CourseUpdate,
+    ImportConfirmRequest,
     StageCreate,
     StageSort,
     StageStatusPatch,
@@ -111,14 +136,20 @@ async def _check_subject_name(db: AsyncSession, name: str, exclude_id: Optional[
 async def list_subjects(db: AsyncSession) -> dict:
     """学科+阶段列表（含删除三态提示所需计数，前端二次确认直接使用本响应）。"""
     subjects = await _active_subjects(db)
-    stages = list(
-        (
-            await db.execute(
-                select(Stage)
-                .where(Stage.deleted_at.is_(None))
-                .order_by(Stage.subject_id, Stage.sort_order, Stage.id)
-            )
-        ).scalars()
+    subject_ids = [s.id for s in subjects]
+    # 阶段随父过滤隐藏（03 S1）：仅统计有效学科下的阶段，已删学科的子级不外显不计数
+    stages = (
+        list(
+            (
+                await db.execute(
+                    select(Stage)
+                    .where(Stage.deleted_at.is_(None), Stage.subject_id.in_(subject_ids))
+                    .order_by(Stage.subject_id, Stage.sort_order, Stage.id)
+                )
+            ).scalars()
+        )
+        if subject_ids
+        else []
     )
     # 计数一次性聚合，避免逐行查询（开发规范 §5.9）
     stage_q_counts: dict[int, int] = dict(
@@ -428,3 +459,722 @@ async def sort_stages(
     )
     await db.commit()
     return {"success": True}
+
+
+# ===================== B站课程库（04 §4.4） =====================
+
+# sort_seq 分段（03 §5.2 S5）：导入批次占低段位升序追加；非导入占 ≥BASE 段位、
+# 手动新增取当前最小-1（最新在前）；列表 ORDER BY sort_seq ASC。
+_MANUAL_SORT_BASE = 10**12
+_IMPORT_TOKEN_PREFIX = "course:import:"
+
+
+async def _next_import_seq(db: AsyncSession) -> int:
+    max_seq = (
+        await db.execute(
+            select(func.max(Course.sort_seq)).where(Course.sort_seq < _MANUAL_SORT_BASE)
+        )
+    ).scalar()
+    return 1 if max_seq is None else max_seq + 1
+
+
+async def _next_manual_sort_seq(db: AsyncSession) -> int:
+    min_seq = (
+        await db.execute(
+            select(func.min(Course.sort_seq)).where(Course.sort_seq >= _MANUAL_SORT_BASE)
+        )
+    ).scalar()
+    return _MANUAL_SORT_BASE if min_seq is None else min_seq - 1
+
+
+async def _other_subject(db: AsyncSession) -> Optional[Subject]:
+    return (
+        await db.execute(
+            select(Subject).where(
+                Subject.name == OTHER_SUBJECT_NAME, Subject.deleted_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _validate_course_subjects(db: AsyncSession, subject_ids: list[int]) -> list[Subject]:
+    """所属学科校验：去重、有效存在；含「其他学科」时仅可单选（04 §4.4 表单约束）。"""
+    if len(subject_ids) != len(set(subject_ids)):
+        raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "所属学科不可重复", http_status=400)
+    rows = list(
+        (
+            await db.execute(
+                select(Subject).where(
+                    Subject.id.in_(subject_ids), Subject.deleted_at.is_(None)
+                )
+            )
+        ).scalars()
+    )
+    by_id = {s.id: s for s in rows}
+    if any(i not in by_id for i in subject_ids):
+        raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "存在无效的所属学科", http_status=400)
+    other = await _other_subject(db)
+    if other is not None and other.id in subject_ids and len(subject_ids) > 1:
+        raise BizError(
+            ErrorCode.PARAM_VALIDATION_FAILED,
+            "「其他学科」不可与其他学科同时选择",
+            http_status=400,
+        )
+    return [by_id[i] for i in subject_ids]
+
+
+async def _set_course_subjects(db: AsyncSession, course_id: int, ordered_ids: list[int]) -> None:
+    """关联学科整体替换（03 S2 编辑替换）：第一个=主学科。"""
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(CourseSubject).where(CourseSubject.course_id == course_id))
+    for i, sid in enumerate(ordered_ids):
+        db.add(CourseSubject(course_id=course_id, subject_id=sid, is_primary=1 if i == 0 else 0))
+
+
+async def _check_bvid(db: AsyncSession, bvid: Optional[str], exclude_id: Optional[int] = None) -> None:
+    if not bvid:
+        return
+    stmt = select(Course.id).where(Course.bvid == bvid, Course.deleted_at.is_(None))
+    if exclude_id is not None:
+        stmt = stmt.where(Course.id != exclude_id)
+    if (await db.execute(stmt)).scalar_one_or_none() is not None:
+        raise BizError(ErrorCode.BIZ_BVID_EXISTS, "BV号已存在", http_status=409)
+
+
+async def _route_ref_counts(db: AsyncSession, course_ids: list[int]) -> dict[int, int]:
+    """课程被有效路线引用的次数（删除确认提示 / 导入影响面）。"""
+    if not course_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(RouteItem.course_id, func.count(RouteItem.id))
+            .join(Route, Route.id == RouteItem.route_id)
+            .where(Route.deleted_at.is_(None), RouteItem.course_id.in_(course_ids))
+            .group_by(RouteItem.course_id)
+        )
+    ).all()
+    return dict(rows)
+
+
+def _course_filters(q: CourseQuery) -> list:
+    """列表/导出共用筛选条件。"""
+    filters = [Course.deleted_at.is_(None)]
+    if q.keyword:
+        filters.append(Course.name.like(f"%{q.keyword.strip()}%"))
+    if q.source and q.source != "all":
+        filters.append(Course.source == int(CourseSource.from_api(q.source)))
+    if q.subjectId:
+        filters.append(
+            Course.id.in_(
+                select(CourseSubject.course_id).where(CourseSubject.subject_id == q.subjectId)
+            )
+        )
+    return filters
+
+
+async def list_courses(db: AsyncSession, q: CourseQuery) -> dict:
+    """课程列表（分页 + 统计卡）；列表 ORDER BY sort_seq ASC（03 §5.2 S5）。"""
+    filters = _course_filters(q)
+
+    total = (
+        await db.execute(select(func.count(Course.id)).where(*filters))
+    ).scalar() or 0
+    rows = list(
+        (
+            await db.execute(
+                select(Course)
+                .where(*filters)
+                .order_by(Course.sort_seq, Course.id)
+                .offset(q.offset)
+                .limit(q.limit)
+            )
+        ).scalars()
+    )
+
+    # 关联学科一次性取回（避免 N+1）
+    course_ids = [c.id for c in rows]
+    links: dict[int, list[CourseSubject]] = {}
+    subject_names: dict[int, str] = {}
+    if course_ids:
+        link_rows = list(
+            (
+                await db.execute(
+                    select(CourseSubject)
+                    .where(CourseSubject.course_id.in_(course_ids))
+                    .order_by(CourseSubject.course_id, CourseSubject.is_primary.desc(), CourseSubject.id)
+                )
+            ).scalars()
+        )
+        for lk in link_rows:
+            links.setdefault(lk.course_id, []).append(lk)
+        sub_rows = (
+            await db.execute(select(Subject.id, Subject.name).where(Subject.deleted_at.is_(None)))
+        ).all()
+        subject_names = dict(sub_rows)
+    ref_counts = await _route_ref_counts(db, course_ids)
+
+    items = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "bvid": c.bvid,
+            "coverUrl": c.cover_url,
+            "durationMinutes": c.duration_minutes,
+            "source": CourseSource(c.source).api,
+            "playUrl": c.play_url,
+            "subjects": [
+                {
+                    "id": lk.subject_id,
+                    "name": subject_names.get(lk.subject_id, "—"),
+                    "isPrimary": lk.is_primary == 1,
+                }
+                for lk in links.get(c.id, [])
+            ],
+            "createdAt": to_shanghai(c.created_at),
+            "routeRefCount": ref_counts.get(c.id, 0),
+        }
+        for c in rows
+    ]
+
+    # 统计卡口径：全库有效课程（不受筛选影响，同原型）；关联学科数不含「其他学科」
+    agg = (
+        await db.execute(
+            select(func.count(Course.id), func.coalesce(func.sum(Course.duration_minutes), 0))
+            .where(Course.deleted_at.is_(None))
+        )
+    ).one()
+    other = await _other_subject(db)
+    linked_stmt = (
+        select(func.count(func.distinct(CourseSubject.subject_id)))
+        .join(Course, Course.id == CourseSubject.course_id)
+        .where(Course.deleted_at.is_(None))
+    )
+    if other is not None:
+        linked_stmt = linked_stmt.where(CourseSubject.subject_id != other.id)
+    linked_count = (await db.execute(linked_stmt)).scalar() or 0
+
+    return {
+        "cards": {
+            "total": agg[0],
+            "totalHours": round(float(agg[1] or 0) / 60, 1),  # SUM 返回 Decimal，转 float 保证可序列化
+            "linkedSubjectCount": linked_count,
+        },
+        "list": items,
+        "total": total,
+        "pageNum": q.pageNum,
+        "pageSize": q.pageSize,
+    }
+
+
+async def create_course(
+    db: AsyncSession, ctx: AdminContext, payload: CourseCreate, ip: str
+) -> dict:
+    await _validate_course_subjects(db, payload.subjectIds)
+    await _check_bvid(db, payload.bvid)
+
+    course = Course(
+        name=payload.name,
+        bvid=payload.bvid,
+        cover_url=payload.coverUrl,
+        duration_minutes=payload.durationMinutes,
+        source=int(CourseSource.from_api(payload.source)),
+        play_url=payload.playUrl,
+        sort_seq=await _next_manual_sort_seq(db),  # 非导入：最新在前（S5）
+    )
+    db.add(course)
+    await db.flush()
+    await _set_course_subjects(db, course.id, payload.subjectIds)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.CREATE,
+        action_desc="新增课程",
+        target=f"课程「{payload.name}」",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"id": course.id}
+
+
+async def _require_course(db: AsyncSession, course_id: int) -> Course:
+    course = (
+        await db.execute(select(Course).where(Course.id == course_id, Course.deleted_at.is_(None)))
+    ).scalar_one_or_none()
+    if course is None:
+        raise BizError(ErrorCode.RESOURCE_NOT_FOUND, "课程不存在", http_status=404)
+    return course
+
+
+async def update_course(
+    db: AsyncSession, ctx: AdminContext, course_id: int, payload: CourseUpdate, ip: str
+) -> dict:
+    course = await _require_course(db, course_id)
+    await _validate_course_subjects(db, payload.subjectIds)
+    await _check_bvid(db, payload.bvid, exclude_id=course_id)
+
+    course.name = payload.name
+    course.bvid = payload.bvid
+    course.cover_url = payload.coverUrl
+    course.duration_minutes = payload.durationMinutes
+    course.source = int(CourseSource.from_api(payload.source))
+    course.play_url = payload.playUrl
+    await _set_course_subjects(db, course.id, payload.subjectIds)  # 整体替换（03 S2）
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="编辑课程",
+        target=f"课程「{payload.name}」",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"success": True}
+
+
+async def delete_course(
+    db: AsyncSession, ctx: AdminContext, course_id: int, ip: str
+) -> dict:
+    course = await _require_course(db, course_id)
+    course.deleted_at = utc_now()  # 逻辑删除；引用它的路线保留引用（恢复可见）
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.DELETE,
+        action_desc="删除课程",
+        target=f"课程「{course.name}」",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"success": True}
+
+
+async def export_courses_xlsx(
+    db: AsyncSession, ctx: AdminContext, q: CourseQuery, ip: str
+) -> tuple[str, bytes]:
+    """导出课程 Excel（04 §4.4 补契约）：按当前筛选，列=导入模板列+创建时间（可导出→修改→重导入）。
+
+    导出行为本身入操作日志（S9 归并「其他」，同日志导出口径）。
+    """
+    rows = list(
+        (
+            await db.execute(
+                select(Course)
+                .where(*_course_filters(q))
+                .order_by(Course.sort_seq, Course.id)
+                .limit(EXPORT_MAX_ROWS)
+            )
+        ).scalars()
+    )
+    course_ids = [c.id for c in rows]
+    links: dict[int, list[CourseSubject]] = {}
+    subject_names: dict[int, str] = {}
+    if course_ids:
+        link_rows = list(
+            (
+                await db.execute(
+                    select(CourseSubject)
+                    .where(CourseSubject.course_id.in_(course_ids))
+                    .order_by(CourseSubject.course_id, CourseSubject.is_primary.desc(), CourseSubject.id)
+                )
+            ).scalars()
+        )
+        for lk in link_rows:
+            links.setdefault(lk.course_id, []).append(lk)
+        subject_names = dict(
+            (await db.execute(select(Subject.id, Subject.name).where(Subject.deleted_at.is_(None)))).all()
+        )
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "课程导出"
+    ws.append(["课程名称", "时长（分钟）", "所属学科", "来源", "BV号", "封面", "播放链接", "创建时间"])
+    for c in rows:
+        ws.append(
+            [
+                c.name,
+                c.duration_minutes,
+                # 逗号分隔与导入解析口径一致（中英文逗号均可识别），首个=主学科
+                ",".join(subject_names.get(lk.subject_id, "") for lk in links.get(c.id, [])),
+                "B站" if c.source == int(CourseSource.BILI) else "其他",
+                c.bvid or "",
+                c.cover_url or "",
+                c.play_url or "",
+                to_shanghai(c.created_at) or "",
+            ]
+        )
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.OTHER,
+        action_desc="导出课程",
+        target="B站课程库",
+        detail=f"导出 {len(rows)} 门",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return "courses.xlsx", buf.getvalue()
+
+
+# ---------- 批量导入（两段式：preview → confirm） ----------
+
+import io
+import json
+import re
+import secrets
+
+import openpyxl
+import xlrd
+import redis.asyncio as aioredis
+
+
+def _cell_str(value) -> str:
+    """单元格取值归一为字符串（390 / 390.0 → "390"）。"""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def _parse_minutes(raw: str) -> Optional[int]:
+    s = raw.strip()
+    if re.fullmatch(r"\d+(\.0+)?", s or ""):
+        n = int(float(s))
+        return n if n >= 1 else None
+    return None
+
+
+def _read_sheet(data: bytes, filename: str) -> list[list[str]]:
+    """读取单工作表为字符串二维表；表头=首行。文件级问题抛 BizError PARAM_FILE_INVALID。"""
+    if filename.lower().endswith(".xls"):
+        book = xlrd.open_workbook(file_contents=data)
+        if book.nsheets != 1:
+            raise BizError(ErrorCode.PARAM_FILE_INVALID, "仅支持单工作表文件", http_status=400)
+        sheet = book.sheet_by_index(0)
+        return [[_cell_str(v) for v in sheet.row_values(i)] for i in range(sheet.nrows)]
+    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True)
+    if len(wb.worksheets) != 1:
+        raise BizError(ErrorCode.PARAM_FILE_INVALID, "仅支持单工作表文件", http_status=400)
+    return [[_cell_str(v) for v in row] for row in wb.active.iter_rows(values_only=True)]
+
+
+_REQUIRED_COLS = ("课程名称", "时长（分钟）")
+_OPTIONAL_COLS = ("所属学科", "来源", "BV号", "封面", "播放链接")
+
+
+async def preview_course_import(
+    db: AsyncSession, r: aioredis.Redis, data: bytes, filename: str
+) -> dict:
+    """导入预览（04 §4.4）：任一无效行整份拒绝；解析结果缓存 importToken 供确认。"""
+    if len(data) > UPLOAD_EXCEL_MAX_BYTES:
+        raise BizError(ErrorCode.PARAM_FILE_INVALID, "文件超过 5MB 限制", http_status=400)
+
+    sheet = _read_sheet(data, filename or "")
+    if not sheet:
+        raise BizError(ErrorCode.PARAM_FILE_INVALID, "文件内容为空", http_status=400)
+
+    header = [_cell_str(h) for h in sheet[0]]
+    col_index = {name: header.index(name) for name in _REQUIRED_COLS + _OPTIONAL_COLS if name in header}
+    missing = [name for name in _REQUIRED_COLS if name not in col_index]
+    if missing:
+        return _import_rejected(0, f"缺少必需列：{'、'.join(missing)}")
+
+    data_rows = sheet[1:]
+    if not data_rows:
+        return _import_rejected(0, "文件无数据行")
+    if len(data_rows) > 2000:
+        return _import_rejected(0, "超过单次 2000 行上限")
+
+    other = await _other_subject(db)
+    valid_subjects = dict(
+        (await db.execute(select(Subject.id, Subject.name).where(Subject.deleted_at.is_(None)))).all()
+    )
+    name_to_id = {n: i for i, n in valid_subjects.items()}
+
+    def cell(row: list[str], col: str) -> str:
+        idx = col_index.get(col)
+        return row[idx].strip() if idx is not None and idx < len(row) else ""
+
+    errors: list[dict] = []
+    warnings: list[dict] = []
+    parsed: list[dict] = []
+    seen_bvid: set[str] = set()
+
+    for offset, row in enumerate(data_rows):
+        row_no = offset + 2  # Excel 行号（含表头）
+        name = cell(row, "课程名称")
+        if not name:
+            errors.append({"rowNo": row_no, "reason": "课程名称缺失"})
+            continue
+        if len(name) > 200:
+            errors.append({"rowNo": row_no, "reason": "课程名称超过 200 字"})
+            continue
+        minutes = _parse_minutes(cell(row, "时长（分钟）"))
+        if minutes is None:
+            errors.append({"rowNo": row_no, "reason": "时长须为正整数（分钟）"})
+            continue
+
+        bvid = cell(row, "BV号") or None
+        if bvid and len(bvid) > 20:
+            errors.append({"rowNo": row_no, "reason": "BV号超过 20 字"})
+            continue
+        if bvid and bvid in seen_bvid:
+            errors.append({"rowNo": row_no, "reason": "文件内 BV号重复"})
+            continue
+        if bvid:
+            seen_bvid.add(bvid)
+
+        source_raw = cell(row, "来源")
+        if source_raw in ("", "B站", "bili"):
+            source = int(CourseSource.BILI)
+        elif source_raw in ("其他", "other"):
+            source = int(CourseSource.OTHER)
+        else:
+            errors.append({"rowNo": row_no, "reason": f"来源值无效「{source_raw}」（B站/其他）"})
+            continue
+
+        cover_url = cell(row, "封面") or None
+        play_url = cell(row, "播放链接") or None
+        if (cover_url and len(cover_url) > 255) or (play_url and len(play_url) > 255):
+            errors.append({"rowNo": row_no, "reason": "封面/播放链接超过 255 字"})
+            continue
+
+        # 所属学科：空 → 其他学科；无法识别/与「其他学科」混选 → 警告并归入「其他学科」
+        segs = [s.strip() for s in re.split(r"[，,]", cell(row, "所属学科")) if s.strip()]
+        row_warnings: list[str] = []
+        if not segs:
+            subject_ids = [other.id] if other else []
+        else:
+            unknown = [s for s in segs if s not in name_to_id]
+            if unknown:
+                row_warnings.append(f"所属学科「{'、'.join(unknown)}」无法识别，已归入「其他学科」")
+                subject_ids = [other.id] if other else []
+            elif OTHER_SUBJECT_NAME in segs and len(segs) > 1:
+                row_warnings.append("「其他学科」不可与其他学科同时勾选，已归入「其他学科」")
+                subject_ids = [other.id] if other else []
+            else:
+                subject_ids = [name_to_id[s] for s in segs]
+        if not subject_ids:
+            errors.append({"rowNo": row_no, "reason": "无有效所属学科且「其他学科」不存在"})
+            continue
+        for reason in row_warnings:
+            warnings.append({"rowNo": row_no, "reason": reason})
+
+        parsed.append(
+            {
+                "name": name,
+                "bvid": bvid,
+                "coverUrl": cover_url,
+                "durationMinutes": minutes,
+                "source": source,
+                "playUrl": play_url,
+                "subjectIds": subject_ids,
+                "subjectNames": "、".join(valid_subjects[i] for i in subject_ids),
+                "warning": bool(row_warnings),
+            }
+        )
+
+    if errors:
+        # 任一无效行整份拒绝（04 §4.4）：一行都不写入，仅报错误清单
+        return {
+            "importToken": "",
+            "summary": {
+                "totalRows": len(data_rows),
+                "newCount": 0,
+                "updateCount": 0,
+                "warningCount": 0,
+                "errorCount": len(errors),
+            },
+            "errors": errors,
+            "warnings": warnings,
+            "affectedRoutes": {"courses": 0, "routes": 0},
+            "rows": [],
+        }
+
+    # 匹配：bvid 优先；无 bvid 按「名称+来源」（04 §4.4 覆盖更新语义）
+    result_rows: list[dict] = []
+    update_ids: list[int] = []
+    for item in parsed:
+        match: Optional[Course] = None
+        if item["bvid"]:
+            match = (
+                await db.execute(
+                    select(Course).where(Course.bvid == item["bvid"], Course.deleted_at.is_(None))
+                )
+            ).scalar_one_or_none()
+        if match is None:
+            match = (
+                await db.execute(
+                    select(Course)
+                    .where(
+                        Course.name == item["name"],
+                        Course.source == item["source"],
+                        Course.deleted_at.is_(None),
+                    )
+                    .order_by(Course.id)
+                )
+            ).scalars().first()
+        item["matchId"] = match.id if match else None
+        if match:
+            update_ids.append(match.id)
+        item["result"] = "warning" if item["warning"] else ("update" if match else "new")
+        result_rows.append(item)
+
+    ref_counts = await _route_ref_counts(db, update_ids)
+    summary = {
+        "totalRows": len(data_rows),
+        "newCount": sum(1 for it in result_rows if it["result"] == "new"),
+        "updateCount": sum(1 for it in result_rows if it["result"] == "update"),
+        "warningCount": sum(1 for it in result_rows if it["result"] == "warning"),
+        "errorCount": 0,
+    }
+
+    token = secrets.token_urlsafe(24)
+    await r.set(
+        _IMPORT_TOKEN_PREFIX + token,
+        json.dumps({"rows": parsed}, ensure_ascii=False),
+        ex=COURSE_IMPORT_TOKEN_TTL_SECONDS,
+    )
+    return {
+        "importToken": token,
+        "summary": summary,
+        "errors": [],
+        "warnings": warnings,
+        "affectedRoutes": {
+            "courses": len(ref_counts),
+            "routes": sum(ref_counts.values()),
+        },
+        "rows": [
+            {
+                "rowNo": i + 2,
+                "name": it["name"],
+                "durationMinutes": it["durationMinutes"],
+                "subjectNames": it["subjectNames"],
+                "source": CourseSource(it["source"]).api,
+                "result": it["result"],
+            }
+            for i, it in enumerate(result_rows[:COURSE_IMPORT_PREVIEW_ROWS])
+        ],
+    }
+
+
+def _import_rejected(row_no: int, reason: str) -> dict:
+    """文件级拒绝（缺列/超限等）。"""
+    return {
+        "importToken": "",
+        "summary": {
+            "totalRows": 0,
+            "newCount": 0,
+            "updateCount": 0,
+            "warningCount": 0,
+            "errorCount": 1,
+        },
+        "errors": [{"rowNo": row_no, "reason": reason}],
+        "warnings": [],
+        "affectedRoutes": {"courses": 0, "routes": 0},
+        "rows": [],
+    }
+
+
+async def confirm_course_import(
+    db: AsyncSession, r: aioredis.Redis, payload: ImportConfirmRequest, ctx: AdminContext, ip: str
+) -> dict:
+    """确认导入（04 §4.4）：Excel 为权威数据源，覆盖更新 + 关联学科整体替换。"""
+    raw = await r.get(_IMPORT_TOKEN_PREFIX + payload.importToken)
+    if not raw:
+        raise BizError(
+            ErrorCode.PARAM_VALIDATION_FAILED, "importToken 无效或已过期，请重新上传", http_status=400
+        )
+    await r.delete(_IMPORT_TOKEN_PREFIX + payload.importToken)  # 一次性使用
+    rows: list[dict] = json.loads(raw)["rows"]
+
+    created = 0
+    updated = 0
+    seq = await _next_import_seq(db)  # 批次按 Excel 行序占用升序段位（S5）
+    for item in rows:
+        match: Optional[Course] = None
+        if item["bvid"]:
+            match = (
+                await db.execute(
+                    select(Course).where(Course.bvid == item["bvid"], Course.deleted_at.is_(None))
+                )
+            ).scalar_one_or_none()
+        if match is None:
+            match = (
+                await db.execute(
+                    select(Course)
+                    .where(
+                        Course.name == item["name"],
+                        Course.source == item["source"],
+                        Course.deleted_at.is_(None),
+                    )
+                    .order_by(Course.id)
+                )
+            ).scalars().first()
+
+        if match is not None:
+            # 覆盖更新：全字段按 Excel 写入（空可选列按空值覆盖，不保留库中原值）
+            match.name = item["name"]
+            match.bvid = item["bvid"]
+            match.cover_url = item["coverUrl"]
+            match.duration_minutes = item["durationMinutes"]
+            match.source = item["source"]
+            match.play_url = item["playUrl"]
+            match.sort_seq = seq  # 覆盖更新的既有课程按 Excel 行序重排（需求 4.3.2）
+            course_id = match.id
+            updated += 1
+        else:
+            course = Course(
+                name=item["name"],
+                bvid=item["bvid"],
+                cover_url=item["coverUrl"],
+                duration_minutes=item["durationMinutes"],
+                source=item["source"],
+                play_url=item["playUrl"],
+                sort_seq=seq,
+            )
+            db.add(course)
+            await db.flush()
+            course_id = course.id
+            created += 1
+        seq += 1
+        await _set_course_subjects(db, course_id, item["subjectIds"])
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.CREATE,
+        action_desc="批量导入课程",
+        target="B站课程库",
+        detail=f"新增 {created} 门、更新 {updated} 门",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"created": created, "updated": updated}
+
+
+def build_import_template() -> bytes:
+    """导入模板（04 §4.4 GET /courses/import/template → .xlsx 流）。"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["课程名称", "时长（分钟）", "所属学科", "来源", "BV号", "封面", "播放链接"])
+    ws.append([
+        "大模型应用开发实战：从 Prompt 到 Agent", 390,
+        "AI应用与智能体开发,AI大模型开发", "B站", "BV1xK4y1E7qA", "🤖", "https://www.bilibili.com/",
+    ])
+    ws.append(["面试高频算法题精讲（内部资料）", 90, "其他学科", "其他", "", "📘", ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

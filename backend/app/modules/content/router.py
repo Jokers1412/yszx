@@ -4,15 +4,23 @@
 管理端 /subjects* /stages* /courses* /questions* /interview-questions* /routes*。
 学员端接口待功能开发阶段按契约补充（挂在 router）；管理端接口挂 admin_router。
 """
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+
+import redis.asyncio as aioredis
 
 from app.core.context import AdminContext
 from app.core.database import get_db
 from app.core.rbac import require_perm
+from app.core.redis import get_redis
 from app.core.response import ok
 from app.modules.content import service
 from app.modules.content.schemas import (
+    CourseCreate,
+    CourseQuery,
+    CourseUpdate,
+    ImportConfirmRequest,
     StageCreate,
     StageSort,
     StageStatusPatch,
@@ -142,3 +150,103 @@ async def delete_stage(
 ):
     """删除阶段（逻辑删除不级联，03 S1）。"""
     return ok(await service.delete_stage(db, ctx, stage_id, ip=_client_ip(request)))
+
+
+# ===================== 管理端 · B站课程库（04 §4.4） =====================
+# /courses/import/* 声明在 /courses/{course_id} 之前，避免被路径参数捕获。
+
+@admin_router.get("/courses")
+async def list_courses(
+    q: CourseQuery = Depends(),
+    _ctx: AdminContext = Depends(require_perm("course:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """课程列表（筛选 + 分页 + 统计卡）。"""
+    return ok(await service.list_courses(db, q))
+
+
+@admin_router.get("/courses/export")
+async def export_courses(
+    request: Request,
+    q: CourseQuery = Depends(),
+    ctx: AdminContext = Depends(require_perm("course:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """导出课程 Excel（按当前筛选；导出行为入操作审计）。"""
+    filename, data = await service.export_courses_xlsx(db, ctx, q, ip=_client_ip(request))
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@admin_router.get("/courses/import/template")
+async def download_import_template(
+    _ctx: AdminContext = Depends(require_perm("course:view")),
+):
+    """下载导入模板（.xlsx 流）。"""
+    data = service.build_import_template()
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=course-import-template.xlsx"},
+    )
+
+
+@admin_router.post("/courses/import/preview")
+async def preview_course_import(
+    file: UploadFile = File(...),
+    _ctx: AdminContext = Depends(require_perm("course:create")),
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+):
+    """导入预览（任一无效行整份拒绝；解析结果缓存 importToken）。"""
+    data = await file.read()
+    return ok(await service.preview_course_import(db, r, data, file.filename or ""))
+
+
+@admin_router.post("/courses/import")
+async def confirm_course_import(
+    payload: ImportConfirmRequest,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("course:create")),
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+):
+    """确认导入（Excel 为权威数据源，覆盖更新）。"""
+    return ok(await service.confirm_course_import(db, r, payload, ctx, ip=_client_ip(request)))
+
+
+@admin_router.post("/courses", status_code=201)
+async def create_course(
+    payload: CourseCreate,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("course:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """新增课程（bvid 冲突 → 409 BIZ_BVID_EXISTS）。"""
+    return ok(await service.create_course(db, ctx, payload, ip=_client_ip(request)))
+
+
+@admin_router.put("/courses/{course_id}")
+async def update_course(
+    course_id: int,
+    payload: CourseUpdate,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("course:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """编辑课程（全量替换，关联学科整体替换）。"""
+    return ok(await service.update_course(db, ctx, course_id, payload, ip=_client_ip(request)))
+
+
+@admin_router.delete("/courses/{course_id}")
+async def delete_course(
+    course_id: int,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("course:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除课程（逻辑删除；引用它的路线保留引用）。"""
+    return ok(await service.delete_course(db, ctx, course_id, ip=_client_ip(request)))

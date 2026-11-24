@@ -23,8 +23,8 @@ import {
 } from '@/api/subjects'
 import type { StageItem, SubjectCards, SubjectItem, SubjectPayload } from '@/api/subjects'
 
-/** 主题色预置色板（04 §4.3 themeColor，与原型 PALETTE 一致，后端同源校验） */
-const THEME_COLORS = ['#2a78d6', '#6250d6', '#1baf7a', '#eb6834', '#e87ba4', '#008300', '#eda100', '#e34948']
+/** 主题色预置色板（04 §4.3 themeColor，与原型 PALETTE 一致，后端同源校验；末位=其他学科兜底灰） */
+const THEME_COLORS = ['#2a78d6', '#6250d6', '#1baf7a', '#eb6834', '#e87ba4', '#008300', '#eda100', '#e34948', '#898781']
 
 const loading = ref(false)
 const cards = ref<SubjectCards>({ total: 0, withStages: 0, stageTotal: 0, questionTotal: 0 })

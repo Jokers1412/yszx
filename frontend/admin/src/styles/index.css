@@ -22,3 +22,9 @@ body {
 .el-button .btn-ic {
   margin-right: 4px;
 }
+
+/* 弱化文本（对齐原型 base.css 工具类） */
+.muted {
+  color: var(--ink-3);
+}
+

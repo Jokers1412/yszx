@@ -47,10 +47,18 @@ UPLOAD_EXCEL_MAX_BYTES = 5 * 1024 * 1024     # Excel ≤5MB
 UPLOAD_IMAGE_MAX_BYTES = 2 * 1024 * 1024     # 图片 jpg/png ≤2MB
 
 # ---- 内容（04 §4.3 学科主题色 = 预置色板，与 prototype/admin/subjects.html PALETTE 一致）----
+# 末位 #898781 为「其他学科」兜底灰（原型 data.js 预置取值，保底可编辑保存）
 THEME_COLOR_PALETTE = (
     "#2a78d6", "#6250d6", "#1baf7a", "#eb6834",
-    "#e87ba4", "#008300", "#eda100", "#e34948",
+    "#e87ba4", "#008300", "#eda100", "#e34948", "#898781",
 )
+
+# 「其他学科」兜底学科名（03 §2.2.1：应用层以名称定位，排他单选/导入归入）
+OTHER_SUBJECT_NAME = "其他学科"
+
+# 课程批量导入：importToken 缓存有效期（预览→确认两段式，04 §4.4）
+COURSE_IMPORT_TOKEN_TTL_SECONDS = 10 * 60
+COURSE_IMPORT_PREVIEW_ROWS = 20  # 预览返回前 N 行
 
 # ---- 逻辑删除标记 ----
 DELETED_AT_NULL = None  # deleted_at IS NULL = 有效（语义常量，供代码引用）
