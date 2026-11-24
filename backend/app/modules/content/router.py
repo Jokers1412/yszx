@@ -21,6 +21,11 @@ from app.modules.content.schemas import (
     CourseQuery,
     CourseUpdate,
     ImportConfirmRequest,
+    RouteCreate,
+    RouteItemsAdd,
+    RouteItemsUpdate,
+    RouteQuery,
+    RouteUpdate,
     StageCreate,
     StageSort,
     StageStatusPatch,
@@ -250,3 +255,83 @@ async def delete_course(
 ):
     """删除课程（逻辑删除；引用它的路线保留引用）。"""
     return ok(await service.delete_course(db, ctx, course_id, ip=_client_ip(request)))
+
+
+# ===================== 管理端 · 学习路线管理（04 §4.7） =====================
+
+@admin_router.get("/routes")
+async def list_routes(
+    q: RouteQuery = Depends(),
+    _ctx: AdminContext = Depends(require_perm("route:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """路线卡片列表（筛选 + 分页）。"""
+    return ok(await service.list_routes(db, q))
+
+
+@admin_router.get("/routes/{route_id}")
+async def get_route(
+    route_id: int,
+    _ctx: AdminContext = Depends(require_perm("route:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """路线详情（课程管理页；预览由前端同数据渲染）。"""
+    return ok(await service.get_route(db, route_id))
+
+
+@admin_router.post("/routes", status_code=201)
+async def create_route(
+    payload: RouteCreate,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("route:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """新建路线（含有序课程）。"""
+    return ok(await service.create_route(db, ctx, payload, ip=_client_ip(request)))
+
+
+@admin_router.put("/routes/{route_id}")
+async def update_route(
+    route_id: int,
+    payload: RouteUpdate,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("route:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """编辑路线（基本信息全量更新，不含课程）。"""
+    return ok(await service.update_route(db, ctx, route_id, payload, ip=_client_ip(request)))
+
+
+@admin_router.delete("/routes/{route_id}")
+async def delete_route(
+    route_id: int,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("route:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除路线（逻辑删除；已学课程标记不受影响）。"""
+    return ok(await service.delete_route(db, ctx, route_id, ip=_client_ip(request)))
+
+
+@admin_router.post("/routes/{route_id}/items")
+async def add_route_items(
+    route_id: int,
+    payload: RouteItemsAdd,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("route:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """从课程库添加课程（已添加的自动忽略）。"""
+    return ok(await service.add_route_items(db, ctx, route_id, payload, ip=_client_ip(request)))
+
+
+@admin_router.put("/routes/{route_id}/items")
+async def update_route_items(
+    route_id: int,
+    payload: RouteItemsUpdate,
+    request: Request,
+    ctx: AdminContext = Depends(require_perm("route:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """课程排序/移除（有序全量，整体替换）。"""
+    return ok(await service.update_route_items(db, ctx, route_id, payload, ip=_client_ip(request)))

@@ -179,3 +179,81 @@ class ImportConfirmRequest(BaseModel):
 class ImportConfirmResult(BaseModel):
     created: int
     updated: int
+
+
+# ---------- 学习路线管理（04 §4.7）----------
+
+class RouteQuery(PageQuery):
+    subjectId: Optional[int] = Field(default=None, ge=1)
+    status: Optional[str] = Field(default="all", pattern="^(all|enabled|disabled)$")
+    keyword: Optional[str] = Field(default=None, max_length=100, description="路线名称模糊")
+
+
+class RouteCoursePreview(BaseModel):
+    name: str
+    coverUrl: Optional[str] = None
+
+
+class RouteCard(BaseModel):
+    id: int
+    name: str
+    status: str  # enabled | disabled
+    subjectName: str
+    targetEducation: Optional[str] = None
+    description: Optional[str] = None
+    courseCount: int
+    totalMinutes: int
+    coursePreview: list[RouteCoursePreview]  # 前 4 门
+    createdAt: str
+
+
+class RouteCourseItem(BaseModel):
+    id: int
+    bvid: Optional[str] = None
+    name: str
+    durationMinutes: int
+    sortOrder: int
+
+
+class RouteDetail(BaseModel):
+    id: int
+    name: str
+    status: str
+    subjectId: int
+    subjectName: str
+    icon: Optional[str] = None
+    targetEducation: Optional[str] = None
+    description: Optional[str] = None
+    courseCount: int
+    totalMinutes: int
+    courses: list[RouteCourseItem]
+    createdAt: str
+
+
+class RouteCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    subjectId: int = Field(ge=1)
+    status: str = Field(pattern="^(enabled|disabled)$")
+    icon: Optional[str] = Field(default=None, max_length=10, description="路线图标 Emoji")
+    targetEducation: Optional[str] = Field(default=None, max_length=50, description="适合学历")
+    description: Optional[str] = Field(default=None, max_length=500)
+    courseIds: list[int] = Field(default_factory=list, description="有序课程 id（可空）")
+
+
+class RouteUpdate(BaseModel):
+    """编辑路线（基本信息全量更新，不含课程，04 §4.7）。"""
+
+    name: str = Field(min_length=1, max_length=100)
+    subjectId: int = Field(ge=1)
+    status: str = Field(pattern="^(enabled|disabled)$")
+    icon: Optional[str] = Field(default=None, max_length=10)
+    targetEducation: Optional[str] = Field(default=None, max_length=50)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
+class RouteItemsAdd(BaseModel):
+    courseIds: list[int] = Field(min_length=1, description="多选添加；已添加的自动忽略")
+
+
+class RouteItemsUpdate(BaseModel):
+    courseIds: list[int] = Field(description="有序全量数组，未含即移除")

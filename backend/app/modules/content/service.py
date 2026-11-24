@@ -1,4 +1,4 @@
-"""content 业务服务（04 §4.3 学科管理、§4.4 B站课程库已实现；题目/路线后续补充）。
+"""content 业务服务（04 §4.3 学科管理、§4.4 B站课程库、§4.7 学习路线管理已实现；题目后续补充）。
 
 职责：学科/阶段维护、课程库（多对多学科、bvid 唯一、导入覆盖语义）、
 题目状态流转与审核（严格流转图）、面试题库（来源标记 Excel 文件名+行号）、
@@ -48,6 +48,11 @@ from app.modules.content.schemas import (
     CourseQuery,
     CourseUpdate,
     ImportConfirmRequest,
+    RouteCreate,
+    RouteItemsAdd,
+    RouteItemsUpdate,
+    RouteQuery,
+    RouteUpdate,
     StageCreate,
     StageSort,
     StageStatusPatch,
@@ -1178,3 +1183,288 @@ def build_import_template() -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ===================== 学习路线管理（04 §4.7） =====================
+
+
+async def _route_course_rows(db: AsyncSession, route_ids: list[int]) -> dict[int, list[tuple]]:
+    """路线 → [(sort_order, course)]（仅有效课程，随父过滤隐藏口径）；一次查询防 N+1。"""
+    if not route_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(RouteItem, Course)
+            .join(Course, Course.id == RouteItem.course_id)
+            .where(RouteItem.route_id.in_(route_ids), Course.deleted_at.is_(None))
+            .order_by(RouteItem.route_id, RouteItem.sort_order, RouteItem.id)
+        )
+    ).all()
+    grouped: dict[int, list[tuple]] = {}
+    for item, course in rows:
+        grouped.setdefault(item.route_id, []).append((item.sort_order, course))
+    return grouped
+
+
+async def _validate_route_courses(db: AsyncSession, course_ids: list[int]) -> None:
+    if len(course_ids) != len(set(course_ids)):
+        raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "课程不可重复", http_status=400)
+    if not course_ids:
+        return
+    count = (
+        await db.execute(
+            select(func.count(Course.id)).where(
+                Course.id.in_(course_ids), Course.deleted_at.is_(None)
+            )
+        )
+    ).scalar() or 0
+    if count != len(course_ids):
+        raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "存在无效的课程", http_status=400)
+
+
+async def _require_route(db: AsyncSession, route_id: int) -> Route:
+    route = (
+        await db.execute(select(Route).where(Route.id == route_id, Route.deleted_at.is_(None)))
+    ).scalar_one_or_none()
+    if route is None:
+        raise BizError(ErrorCode.RESOURCE_NOT_FOUND, "路线不存在", http_status=404)
+    return route
+
+
+async def _require_route_subject(db: AsyncSession, subject_id: int) -> Subject:
+    subject = (
+        await db.execute(
+            select(Subject).where(Subject.id == subject_id, Subject.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if subject is None:
+        raise BizError(ErrorCode.PARAM_VALIDATION_FAILED, "关联学科不存在", http_status=400)
+    return subject
+
+
+async def list_routes(db: AsyncSession, q: RouteQuery) -> dict:
+    """路线卡片列表（分页）。"""
+    filters = [Route.deleted_at.is_(None)]
+    if q.subjectId:
+        filters.append(Route.subject_id == q.subjectId)
+    if q.status and q.status != "all":
+        filters.append(Route.status == int(EnableStatus.from_api(q.status)))
+    if q.keyword:
+        filters.append(Route.name.like(f"%{q.keyword.strip()}%"))
+
+    total = (await db.execute(select(func.count(Route.id)).where(*filters))).scalar() or 0
+    rows = list(
+        (
+            await db.execute(
+                select(Route)
+                .where(*filters)
+                .order_by(Route.id.desc())
+                .offset(q.offset)
+                .limit(q.limit)
+            )
+        ).scalars()
+    )
+
+    route_ids = [r.id for r in rows]
+    course_map = await _route_course_rows(db, route_ids)
+    subject_names = dict(
+        (await db.execute(select(Subject.id, Subject.name).where(Subject.deleted_at.is_(None)))).all()
+    )
+
+    items = []
+    for r in rows:
+        pairs = course_map.get(r.id, [])
+        items.append(
+            {
+                "id": r.id,
+                "name": r.name,
+                "status": EnableStatus(r.status).api,
+                "subjectName": subject_names.get(r.subject_id, "—"),
+                "targetEducation": r.target_education,
+                "description": r.description,
+                "courseCount": len(pairs),
+                "totalMinutes": sum(c.duration_minutes for _, c in pairs),
+                "coursePreview": [
+                    {"name": c.name, "coverUrl": c.cover_url} for _, c in pairs[:4]
+                ],
+                "createdAt": to_shanghai(r.created_at),
+            }
+        )
+    return {"list": items, "total": total, "pageNum": q.pageNum, "pageSize": q.pageSize}
+
+
+async def get_route(db: AsyncSession, route_id: int) -> dict:
+    """路线详情（课程管理页；预览由前端同数据渲染）。"""
+    route = await _require_route(db, route_id)
+    subject = await _require_route_subject(db, route.subject_id)
+    pairs = (await _route_course_rows(db, [route.id])).get(route.id, [])
+    return {
+        "id": route.id,
+        "name": route.name,
+        "status": EnableStatus(route.status).api,
+        "subjectId": route.subject_id,
+        "subjectName": subject.name,
+        "icon": route.icon,
+        "targetEducation": route.target_education,
+        "description": route.description,
+        "courseCount": len(pairs),
+        "totalMinutes": sum(c.duration_minutes for _, c in pairs),
+        "courses": [
+            {
+                "id": c.id,
+                "bvid": c.bvid,
+                "name": c.name,
+                "durationMinutes": c.duration_minutes,
+                "sortOrder": sort_order,
+            }
+            for sort_order, c in pairs
+        ],
+        "createdAt": to_shanghai(route.created_at),
+    }
+
+
+async def create_route(
+    db: AsyncSession, ctx: AdminContext, payload: RouteCreate, ip: str
+) -> dict:
+    subject = await _require_route_subject(db, payload.subjectId)
+    await _validate_route_courses(db, payload.courseIds)
+
+    route = Route(
+        name=payload.name,
+        subject_id=subject.id,
+        icon=payload.icon,
+        target_education=payload.targetEducation,
+        description=payload.description,
+        status=int(EnableStatus.from_api(payload.status)),
+    )
+    db.add(route)
+    await db.flush()
+    for i, cid in enumerate(payload.courseIds, start=1):
+        db.add(RouteItem(route_id=route.id, course_id=cid, sort_order=i))
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.CREATE,
+        action_desc="新建路线",
+        target=f"路线「{payload.name}」",
+        detail=f"含 {len(payload.courseIds)} 门课程",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"id": route.id}
+
+
+async def update_route(
+    db: AsyncSession, ctx: AdminContext, route_id: int, payload: RouteUpdate, ip: str
+) -> dict:
+    route = await _require_route(db, route_id)
+    subject = await _require_route_subject(db, payload.subjectId)
+
+    route.name = payload.name
+    route.subject_id = subject.id
+    route.icon = payload.icon
+    route.target_education = payload.targetEducation
+    route.description = payload.description
+    route.status = int(EnableStatus.from_api(payload.status))
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="编辑路线",
+        target=f"路线「{payload.name}」",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"success": True}
+
+
+async def delete_route(
+    db: AsyncSession, ctx: AdminContext, route_id: int, ip: str
+) -> dict:
+    route = await _require_route(db, route_id)
+    route.deleted_at = utc_now()  # 逻辑删除；已学课程标记不受影响
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.DELETE,
+        action_desc="删除路线",
+        target=f"路线「{route.name}」",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"success": True}
+
+
+async def add_route_items(
+    db: AsyncSession, ctx: AdminContext, route_id: int, payload: RouteItemsAdd, ip: str
+) -> dict:
+    """从课程库添加课程（已添加的自动忽略，04 §4.7）。"""
+    route = await _require_route(db, route_id)
+    await _validate_route_courses(db, payload.courseIds)
+
+    existing = {
+        row[0]
+        for row in (
+            await db.execute(select(RouteItem.course_id).where(RouteItem.route_id == route.id))
+        ).all()
+    }
+    max_sort = (
+        await db.execute(
+            select(func.coalesce(func.max(RouteItem.sort_order), 0)).where(
+                RouteItem.route_id == route.id
+            )
+        )
+    ).scalar()
+    added = 0
+    for cid in payload.courseIds:
+        if cid in existing:
+            continue
+        max_sort += 1
+        db.add(RouteItem(route_id=route.id, course_id=cid, sort_order=max_sort))
+        added += 1
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="添加路线课程",
+        target=f"路线「{route.name}」",
+        detail=f"新增 {added} 门",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"affected": added}
+
+
+async def update_route_items(
+    db: AsyncSession, ctx: AdminContext, route_id: int, payload: RouteItemsUpdate, ip: str
+) -> dict:
+    """课程排序/移除（有序全量，整体替换 sortOrder，03 S2）。"""
+    route = await _require_route(db, route_id)
+    await _validate_route_courses(db, payload.courseIds)
+
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(RouteItem).where(RouteItem.route_id == route.id))
+    for i, cid in enumerate(payload.courseIds, start=1):
+        db.add(RouteItem(route_id=route.id, course_id=cid, sort_order=i))
+
+    await record_operation(
+        db,
+        action_type=OperationActionType.UPDATE,
+        action_desc="更新路线课程",
+        target=f"路线「{route.name}」",
+        detail=f"调整后 {len(payload.courseIds)} 门",
+        admin_user_id=ctx.admin_id,
+        admin_username=ctx.username,
+        ip=ip,
+    )
+    await db.commit()
+    return {"success": True}
