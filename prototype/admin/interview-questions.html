@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面试题库管理 · 云枢智学管理后台</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  /* 页面特有样式 */
+  .stem-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .stem-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
+  }
+  .stem-cell .badge { flex-shrink: 0; }
+  .topic-cell .out-vocab { color: var(--ink-3); font-size: 11px; margin-left: 4px; }
+  .import-preview-table td, .import-preview-table th { font-size: 12px; padding: 8px 10px; }
+  .import-preview-table tr.row-warn { background: var(--warning-bg); }
+  .import-preview-table tr.row-error { background: var(--danger-bg); }
+  .subject-chip {
+    display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px;
+    background: var(--brand-light); color: var(--brand-dark); font-size: 12px; margin: 0 6px 6px 0;
+  }
+  .readonly-box {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 10px 12px; font-size: 13px; color: var(--ink-2); white-space: pre-wrap; word-break: break-word;
+  }
+  .file-info { font-size: 13px; color: var(--ink-2); }
+</style>
+</head>
+<body class="admin-body" data-page="interview-questions">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <!-- 筛选 -->
+      <div class="filter-bar">
+        <input class="input search-input" id="f-kw" placeholder="搜索题干关键词">
+        <select class="select" id="f-direction"><option value="">全部知识库</option></select>
+        <select class="select" id="f-topic"><option value="">全部主题</option></select>
+        <select class="select" id="f-difficulty">
+          <option value="">全部难度</option>
+          <option value="easy">简单</option>
+          <option value="medium">中等</option>
+          <option value="hard">困难</option>
+        </select>
+        <label class="checkbox-row"><input type="checkbox" id="f-uncat">只看未分类</label>
+      </div>
+
+      <!-- 操作行 -->
+      <div class="toolbar-row">
+        <button class="btn btn-primary" id="btn-search">查询</button>
+        <button class="btn" id="btn-reset">重置</button>
+        <div class="toolbar-right">
+          <button class="btn" id="btn-import">手动导入</button>
+          <button class="btn btn-primary" id="btn-create">录入题目</button>
+        </div>
+      </div>
+
+      <!-- 表格 -->
+      <div class="card">
+        <div class="table-wrap" id="iq-table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:44%">题目</th>
+                <th style="width:22%">来源</th>
+                <th style="width:8%">难度</th>
+                <th style="width:12%">主题</th>
+                <th style="width:14%">操作</th>
+              </tr>
+            </thead>
+            <tbody id="iq-rows"></tbody>
+          </table>
+        </div>
+        <div class="empty-state hidden" id="iq-empty">
+          <div class="empty-icon">🔍</div>
+          <div class="empty-title" id="iq-empty-title">没有符合条件的题目</div>
+          <div class="empty-sub" id="iq-empty-sub">试试调整筛选条件</div>
+        </div>
+        <div class="card-footer" style="justify-content:space-between;align-items:center">
+          <label class="checkbox-row">每页
+            <select class="select" id="page-size" style="width:auto;padding:4px 8px">
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select> 条
+          </label>
+          <div class="pagination" id="iq-pager" style="padding:0"></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- 录入题目弹窗 -->
+<div class="modal-overlay" id="modal-create" hidden>
+  <div class="modal">
+    <div class="modal-header"><h3>录入题目</h3><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">所属知识库<span class="req">*</span></label>
+        <select class="select" id="c-direction"><option value="">请选择知识库</option></select>
+      </div>
+      <div class="field">
+        <label class="field-label">题干<span class="req">*</span></label>
+        <textarea class="textarea" id="c-stem" placeholder="请输入面试题题干"></textarea>
+      </div>
+      <div class="field">
+        <label class="field-label">参考答案</label>
+        <textarea class="textarea" id="c-ref" placeholder="可留空"></textarea>
+      </div>
+      <div class="field">
+        <label class="field-label">主题</label>
+        <input class="input" id="c-topic" placeholder="留空表示未分类">
+        <div class="field-hint">主题词表来自系统配置</div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label">难度</label>
+          <select class="select" id="c-diff">
+            <option value="easy">简单</option>
+            <option value="medium" selected>中等</option>
+            <option value="hard">困难</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">标签</label>
+          <input class="input" id="c-tags" placeholder="多个标签用逗号分隔">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close>取消</button>
+      <button class="btn btn-primary" id="c-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑弹窗（仅可修改主题与难度） -->
+<div class="modal-overlay" id="modal-edit" hidden>
+  <div class="modal">
+    <div class="modal-header"><h3>编辑题目</h3><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">题干（只读）</label>
+        <div class="readonly-box" id="e-stem"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">参考答案（只读）</label>
+        <div class="readonly-box" id="e-ref"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">主题</label>
+        <select class="select" id="e-topic"></select>
+        <div class="field-hint">主题词表来自系统配置，选择「未分类」将清空主题</div>
+      </div>
+      <div class="field">
+        <label class="field-label">难度</label>
+        <select class="select" id="e-diff">
+          <option value="easy">简单</option>
+          <option value="medium">中等</option>
+          <option value="hard">困难</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close>取消</button>
+      <button class="btn btn-primary" id="e-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 详情弹窗 -->
+<div class="modal-overlay" id="modal-detail" hidden>
+  <div class="modal">
+    <div class="modal-header"><h3>题目详情</h3><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body" id="detail-body"></div>
+    <div class="modal-footer"><button class="btn btn-primary" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- 手动导入弹窗 -->
+<div class="modal-overlay" id="modal-import" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header"><h3>手动导入面试题</h3><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="import-drop" id="import-drop">
+        <div style="font-size:28px">📥</div>
+        <div>点击选择 Excel 文件（.xlsx / .xls）</div>
+        <div class="muted" style="font-size:12px;margin-top:6px">≤5MB · ≤500 行 · 仅读取第一张工作表</div>
+      </div>
+      <div class="flex-between mt-8">
+        <button class="btn-link" id="import-bad-demo">载入示例：含错误行的文件</button>
+        <button class="btn btn-sm" id="import-tpl">下载导入模板</button>
+      </div>
+      <div class="import-note mt-16">
+        · 表头按名称识别，列顺序可变，共 6 列：所属学科、题干、难度、主题、标签、参考答案<br>
+        · 所属学科、题干为必填列；弹窗内不再选择所属学科，一律以文件「所属学科」列为准，一个文件可包含多个学科<br>
+        · 确认导入时逐行按文件中的主题 / 难度 / 标签入库，不做统一覆盖<br>
+        · 任一无效行（含所属学科在系统中不存在）即整份文件拒绝导入，并报出行号与原因
+      </div>
+      <div id="import-preview" class="mt-16"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close>取消</button>
+      <button class="btn btn-primary" id="import-confirm">确认导入</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ================= 基础数据 ================= */
+  var DIRECTIONS = DB.ivDirections.map(function (d) { return d.name; }); // 8 个知识库方向
+  var list = DB.interviewBank; // 页面内增删均作用于该列表
+
+  // 主题词表（系统配置原型）：数据主题去重 + 2 个 0 题主题
+  var VOCAB = [];
+  list.forEach(function (q) { if (q.topic && VOCAB.indexOf(q.topic) < 0) VOCAB.push(q.topic); });
+  ["多模态", "向量数据库"].forEach(function (t) { if (VOCAB.indexOf(t) < 0) VOCAB.push(t); });
+  VOCAB.sort();
+
+  function isVocab(t) { return t && VOCAB.indexOf(t) >= 0; }
+  function alive() { return list.filter(function (q) { return !q.deleted; }); }
+
+  var page = 1, pageSize = 10;
+
+  function diffBadge(d) {
+    var cls = d === "easy" ? "badge-green" : d === "hard" ? "badge-red" : "badge-orange";
+    return '<span class="badge ' + cls + '">' + DB.diffLabel[d] + "</span>";
+  }
+  function sourceMark(q) {
+    if (q.source.type === "manual") return '<span class="badge badge-gray">手工录入</span>';
+    return '<span class="badge badge-gray" title="' + UI.esc(q.source.file) + " · 第 " + q.source.row + ' 行">' +
+      UI.esc(q.source.file) + " · 第 " + q.source.row + " 行</span>";
+  }
+  function topicCell(q) {
+    if (!q.topic) return '<span class="muted">未分类</span>';
+    var out = isVocab(q.topic) ? "" : '<span class="out-vocab">(词表外)</span>';
+    return '<span class="topic-cell">' + UI.esc(q.topic) + out + "</span>";
+  }
+
+  /* ================= 筛选 ================= */
+  var fKw = document.getElementById("f-kw");
+  var fDir = document.getElementById("f-direction");
+  var fTopic = document.getElementById("f-topic");
+  var fDiff = document.getElementById("f-difficulty");
+  var fUncat = document.getElementById("f-uncat");
+
+  function fillDirections() {
+    fDir.innerHTML = '<option value="">全部知识库</option>' + DIRECTIONS.map(function (d) {
+      return '<option value="' + UI.esc(d) + '">' + UI.esc(d) + "</option>";
+    }).join("");
+  }
+  function fillTopics() {
+    var extra = [];
+    alive().forEach(function (q) {
+      if (q.topic && VOCAB.indexOf(q.topic) < 0 && extra.indexOf(q.topic) < 0) extra.push(q.topic);
+    });
+    var html = '<option value="">全部主题</option>' + VOCAB.map(function (t) {
+      return '<option value="' + UI.esc(t) + '">' + UI.esc(t) + "</option>";
+    }).join("");
+    extra.forEach(function (t) {
+      html += '<option value="' + UI.esc(t) + '">' + UI.esc(t) + "（词表外）</option>";
+    });
+    var cur = fTopic.value;
+    fTopic.innerHTML = html;
+    if (cur) fTopic.value = cur;
+  }
+
+  // 「只看未分类」与主题下拉互斥
+  fUncat.addEventListener("change", function () {
+    if (fUncat.checked) { fTopic.value = ""; fTopic.disabled = true; }
+    else { fTopic.disabled = false; }
+    apply();
+  });
+  fTopic.addEventListener("change", function () {
+    if (fTopic.value) { fUncat.checked = false; fUncat.disabled = true; }
+    else { fUncat.disabled = false; }
+    apply();
+  });
+  fDir.addEventListener("change", apply);
+  fDiff.addEventListener("change", apply);
+  fKw.addEventListener("input", UI.debounce(apply, 300));
+
+  document.getElementById("btn-search").addEventListener("click", apply);
+  document.getElementById("btn-reset").addEventListener("click", function () {
+    fKw.value = ""; fDir.value = ""; fTopic.value = ""; fDiff.value = "";
+    fUncat.checked = false;
+    fTopic.disabled = false; fUncat.disabled = false;
+    apply();
+  });
+
+  document.getElementById("page-size").addEventListener("change", function () {
+    pageSize = parseInt(this.value, 10) || 10;
+    page = 1;
+    render();
+  });
+
+  function currentFilters() {
+    return {
+      kw: fKw.value.trim().toLowerCase(),
+      direction: fDir.value,
+      topic: fTopic.value,
+      difficulty: fDiff.value,
+      uncat: fUncat.checked
+    };
+  }
+  function apply() { page = 1; render(); }
+
+  function filtered() {
+    var f = currentFilters();
+    return alive().filter(function (q) {
+      if (f.kw && q.stem.toLowerCase().indexOf(f.kw) < 0) return false;
+      if (f.direction && q.direction !== f.direction) return false;
+      if (f.uncat) { if (q.topic) return false; }
+      else if (f.topic && q.topic !== f.topic) return false;
+      if (f.difficulty && q.difficulty !== f.difficulty) return false;
+      return true;
+    });
+  }
+
+  /* ================= 列表渲染 ================= */
+  var rowsEl = document.getElementById("iq-rows");
+  var tableWrap = document.getElementById("iq-table-wrap");
+  var emptyEl = document.getElementById("iq-empty");
+
+  function render() {
+    fillTopics();
+    var data = filtered();
+    var pages = Math.max(1, Math.ceil(data.length / pageSize));
+    if (page > pages) page = pages;
+    var slice = data.slice((page - 1) * pageSize, page * pageSize);
+
+    if (!data.length) {
+      tableWrap.classList.add("hidden");
+      emptyEl.classList.remove("hidden");
+      if (currentFilters().uncat) {
+        document.getElementById("iq-empty-title").textContent = "没有未分类的题目";
+        document.getElementById("iq-empty-sub").textContent = "题库里的题都标好主题了";
+      } else {
+        document.getElementById("iq-empty-title").textContent = "没有符合条件的题目";
+        document.getElementById("iq-empty-sub").textContent = "试试调整筛选条件";
+      }
+    } else {
+      tableWrap.classList.remove("hidden");
+      emptyEl.classList.add("hidden");
+    }
+
+    rowsEl.innerHTML = slice.map(function (q) {
+      return '<tr data-id="' + q.id + '">' +
+        '<td><div class="stem-cell"><span class="stem-text" title="' + UI.esc(q.stem) + '">' + UI.esc(q.stem) + "</span>" +
+        sourceMark(q) + "</div></td>" +
+        "<td>" + sourceMark(q) + "</td>" +
+        "<td>" + diffBadge(q.difficulty) + "</td>" +
+        "<td>" + topicCell(q) + "</td>" +
+        '<td class="cell-actions">' +
+        '<button class="btn-link" data-act="view">详情</button>' +
+        '<button class="btn-link" data-act="edit">编辑</button>' +
+        '<button class="btn-link danger" data-act="del">删除</button>' +
+        "</td></tr>";
+    }).join("");
+
+    UI.pager(document.getElementById("iq-pager"), {
+      total: data.length, page: page, pageSize: pageSize,
+      onChange: function (p) { page = p; render(); }
+    });
+  }
+
+  rowsEl.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-act]");
+    if (!b) return;
+    var id = b.closest("tr").dataset.id;
+    var q = list.filter(function (x) { return x.id === id; })[0];
+    if (!q) return;
+    var act = b.dataset.act;
+    if (act === "view") openDetail(q);
+    else if (act === "edit") openEdit(q);
+    else if (act === "del") doDelete(q);
+  });
+
+  /* ================= 录入题目 ================= */
+  var cDir = document.getElementById("c-direction");
+  cDir.innerHTML = '<option value="">请选择知识库</option>' + DIRECTIONS.map(function (d) {
+    return '<option value="' + UI.esc(d) + '">' + UI.esc(d) + "</option>";
+  }).join("");
+
+  document.getElementById("btn-create").addEventListener("click", function () {
+    cDir.value = "";
+    document.getElementById("c-stem").value = "";
+    document.getElementById("c-ref").value = "";
+    document.getElementById("c-topic").value = "";
+    document.getElementById("c-diff").value = "medium";
+    document.getElementById("c-tags").value = "";
+    UI.openModal("modal-create");
+  });
+
+  document.getElementById("c-save").addEventListener("click", function () {
+    var dir = cDir.value;
+    var stem = document.getElementById("c-stem").value.trim();
+    if (!dir) { UI.toast("请选择所属知识库", "warn"); cDir.classList.add("error"); return; }
+    if (!stem) { UI.toast("请输入题干", "warn"); document.getElementById("c-stem").classList.add("error"); return; }
+    cDir.classList.remove("error");
+    document.getElementById("c-stem").classList.remove("error");
+
+    list.unshift({
+      id: "iq-" + Date.now(),
+      direction: dir,
+      stem: stem,
+      refAnswer: document.getElementById("c-ref").value.trim(),
+      topic: document.getElementById("c-topic").value.trim(),
+      difficulty: document.getElementById("c-diff").value,
+      tags: document.getElementById("c-tags").value.trim(),
+      source: { type: "manual" }
+    });
+    UI.closeModal("modal-create");
+    UI.toast("录入成功");
+    page = 1;
+    render();
+  });
+
+  /* ================= 编辑（仅主题与难度） ================= */
+  var editing = null;
+
+  function openEdit(q) {
+    editing = q;
+    document.getElementById("e-stem").textContent = q.stem;
+    document.getElementById("e-ref").textContent = q.refAnswer || "（无参考答案）";
+
+    var opts = '<option value="">未分类（清空主题）</option>' + VOCAB.map(function (t) {
+      return '<option value="' + UI.esc(t) + '">' + UI.esc(t) + "</option>";
+    }).join("");
+    if (q.topic && !isVocab(q.topic)) {
+      opts += '<option value="' + UI.esc(q.topic) + '">' + UI.esc(q.topic) + "（词表外）</option>";
+    }
+    var sel = document.getElementById("e-topic");
+    sel.innerHTML = opts;
+    sel.value = q.topic || "";
+    document.getElementById("e-diff").value = q.difficulty;
+    UI.openModal("modal-edit");
+  }
+
+  document.getElementById("e-save").addEventListener("click", function () {
+    if (!editing) return;
+    editing.topic = document.getElementById("e-topic").value.trim();
+    editing.difficulty = document.getElementById("e-diff").value;
+    UI.closeModal("modal-edit");
+    UI.toast("已保存");
+    editing = null;
+    render();
+  });
+
+  /* ================= 详情 ================= */
+  function openDetail(q) {
+    document.getElementById("detail-body").innerHTML =
+      '<div class="field"><label class="field-label">题干</label><div class="readonly-box">' + UI.esc(q.stem) + "</div></div>" +
+      '<div class="field"><label class="field-label">参考答案</label><div class="readonly-box">' +
+      (q.refAnswer ? UI.esc(q.refAnswer) : '<span class="muted">（无参考答案）</span>') + "</div></div>" +
+      '<dl class="desc-list">' +
+      "<dt>来源</dt><dd>" + sourceMark(q) + "</dd>" +
+      "<dt>难度</dt><dd>" + diffBadge(q.difficulty) + "</dd>" +
+      "<dt>主题</dt><dd>" + topicCell(q) + "</dd>" +
+      "<dt>标签</dt><dd>" + (q.tags ? UI.esc(q.tags) : '<span class="muted">（无）</span>') + "</dd>" +
+      "</dl>";
+    UI.openModal("modal-detail");
+  }
+
+  /* ================= 删除（逻辑删除，按来源提示风险） ================= */
+  function doDelete(q) {
+    var warn = q.source.type === "manual"
+      ? '<div class="alert alert-error">手工录入无源文档，删除后不可恢复</div>'
+      : '<div class="alert alert-warn">数据来自导入文件 ' + UI.esc(q.source.file) + "，删除后可由源文件恢复</div>";
+    UI.confirm({
+      title: "删除题目",
+      html: warn + "<p class=\"mb-0 text-2\">确定删除该题目吗？</p>",
+      okText: "删除",
+      danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      q.deleted = true; // 逻辑删除
+      UI.toast("已删除");
+      render();
+    });
+  }
+
+  /* ================= 手动导入 ================= */
+  // 模拟文件：有效（含 1 行告警）
+  var GOOD_FILE = {
+    name: "面试题批量导入-202611.xlsx",
+    size: "48.6 KB",
+    rows: [
+      { row: 1, subject: "AI应用与智能体开发", stem: "请说明 Agent 记忆的短期与长期记忆如何设计？", difficulty: "medium", topic: "Agent", tags: "记忆,Agent", ref: "短期记忆用会话上下文，长期记忆用向量库沉淀并检索。" },
+      { row: 2, subject: "AI应用与智能体开发", stem: "提示词模板在工程上如何管理与版本化？", difficulty: "easy", topic: "Prompt", tags: "提示词,工程化", ref: "模板纳入配置中心与版本控制，配套回归评测。" },
+      { row: 3, subject: "AI大模型开发", stem: "什么是 MoE（专家混合）结构？它带来什么收益？", difficulty: "hard", topic: "深度学习", tags: "MoE", ref: "将 FFN 拆成多个专家按路由激活，参数量大而计算量可控。" },
+      { row: 4, subject: "AI大模型开发", stem: "vLLM 的 PagedAttention 解决了什么问题？", difficulty: "medium", topic: "部署", tags: "vLLM,推理", ref: "解决 KV Cache 显存碎片与浪费，提升并发吞吐。" },
+      { row: 5, subject: "AI运维", stem: "如何为 Kubernetes 工作负载配置 HPA？", difficulty: "medium", topic: "K8s", tags: "HPA,K8s", ref: "按 CPU / 自定义指标设定目标值与副本范围。" },
+      { row: 6, subject: "AI测试", stem: "大模型输出的回归测试如何做？", difficulty: "medium", topic: "AI测试", tags: "回归测试", ref: "固定提示集 + 自动评分器 + 阈值告警。" },
+      { row: 7, subject: "AI应用与智能体开发", stem: "多轮对话中如何维护会话状态？", difficulty: "medium", topic: "提示工程", tags: "对话状态", ref: "用会话窗口 + 状态摘要，必要时落库。" },
+      { row: 8, subject: "AI视觉设计", stem: "如何评估 AIGC 出图与提示词的一致性？", difficulty: "easy", topic: "AIGC绘图", tags: "评估", ref: "人工评分结合 VQA 自动评分。" },
+      { row: 9, subject: "AI视频与短剧创作", stem: "分镜脚本包含哪些必备要素？", difficulty: "easy", topic: "AI视频", tags: "分镜", ref: "镜号、景别、时长、台词、画面描述、音效。" },
+      { row: 10, subject: "AI具身智能机器人开发", stem: "手眼标定的目的是什么？", difficulty: "hard", topic: "感知与规划", tags: "标定", ref: "求取相机坐标系与末端坐标系的变换关系。" },
+      { row: 11, subject: "AI嵌入式_机器人开发", stem: "实时操作系统与 Linux 的关键差异？", difficulty: "medium", topic: "嵌入式", tags: "RTOS", ref: "确定性调度、低中断延迟、可预测响应时间。" },
+      { row: 12, subject: "AI大模型开发", stem: "模型服务的灰度发布有哪些策略？", difficulty: "easy", topic: "部署", tags: "灰度", ref: "按流量比例、按租户、金丝雀发布逐步放量。" }
+    ],
+    warnings: [{ row: 7, msg: "主题「提示工程」不在主题词表，将作为词表外主题入库" }]
+  };
+  // 模拟文件：含无效行（整份拒绝）
+  var BAD_FILE = {
+    name: "面试题批量导入-含错误.xlsx",
+    size: "21.3 KB",
+    rows: [
+      { row: 1, subject: "AI测试", stem: "接口测试中如何构造边界值用例？", difficulty: "easy", topic: "测试基础", tags: "边界值", ref: "取上下界、越界与特殊值。" },
+      { row: 2, subject: "AI运维", stem: "Linux 查看磁盘占用的常用命令？", difficulty: "easy", topic: "Linux", tags: "Linux", ref: "df、du。" },
+      { row: 3, subject: "AI大模型开发", stem: "什么是 KV Cache？", difficulty: "medium", topic: "部署", tags: "KV Cache", ref: "缓存历史 K/V 避免重复计算。" },
+      { row: 4, subject: "AI应用与智能体开发", stem: "工具调用失败时的降级策略有哪些？", difficulty: "medium", topic: "Agent", tags: "降级", ref: "重试、备用工具、人工兜底。" },
+      { row: 5, subject: "AI应用与智能体开发", stem: "", difficulty: "medium", topic: "Agent", tags: "", ref: "" },
+      { row: 6, subject: "AI测试", stem: "如何设计提示词注入的攻击用例？", difficulty: "hard", topic: "安全", tags: "安全", ref: "构造越狱、角色劫持、指令覆盖类输入。" },
+      { row: 7, subject: "AI视觉设计", stem: "ControlNet 的作用是什么？", difficulty: "medium", topic: "AIGC绘图", tags: "ControlNet", ref: "用结构/姿态等条件控制出图。" },
+      { row: 8, subject: "AI安全", stem: "如何防止模型输出泄露系统提示？", difficulty: "hard", topic: "安全", tags: "安全", ref: "输出过滤与提示加固。" }
+    ],
+    errors: [
+      { row: 5, msg: "题干为空" },
+      { row: 8, msg: "所属学科「AI安全」在系统中不存在" }
+    ]
+  };
+
+  var importState = { file: null, ok: false };
+
+  function renderImportPreview() {
+    var box = document.getElementById("import-preview");
+    var confirmBtn = document.getElementById("import-confirm");
+    var f = importState.file;
+    if (!f) {
+      box.innerHTML = "";
+      confirmBtn.disabled = true;
+      return;
+    }
+    var html = '<div class="file-info">已选择文件：<b>' + UI.esc(f.name) + "</b> · 大小 " + UI.esc(f.size) + "</div>";
+
+    if (f.errors && f.errors.length) {
+      html += '<div class="alert alert-error mt-8">校验未通过，整份文件已拒绝导入：' +
+        f.errors.map(function (e) { return "第 " + e.row + " 行：" + UI.esc(e.msg); }).join("；") + "</div>";
+      importState.ok = false;
+    } else {
+      // 涉及学科汇总
+      var sum = {};
+      f.rows.forEach(function (r) { sum[r.subject] = (sum[r.subject] || 0) + 1; });
+      html += '<div class="mt-8"><span class="field-label">涉及学科汇总</span>' +
+        Object.keys(sum).map(function (s) {
+          return '<span class="subject-chip">' + UI.esc(s) + " × " + sum[s] + "</span>";
+        }).join("") + "</div>";
+      importState.ok = true;
+    }
+
+    // 各行解析结果
+    html += '<div class="table-wrap mt-8"><table class="table import-preview-table"><thead><tr>' +
+      "<th>行号</th><th>所属学科</th><th>题干</th><th>难度</th><th>主题</th><th>校验结果</th>" +
+      "</tr></thead><tbody>" +
+      f.rows.map(function (r) {
+        var err = (f.errors || []).filter(function (e) { return e.row === r.row; })[0];
+        var warn = (f.warnings || []).filter(function (w) { return w.row === r.row; })[0];
+        var cls = err ? "row-error" : warn ? "row-warn" : "";
+        var res = err
+          ? '<span class="badge badge-red">无效：' + UI.esc(err.msg) + "</span>"
+          : warn
+            ? '<span class="badge badge-orange">警告：' + UI.esc(warn.msg) + "</span>"
+            : '<span class="badge badge-green">通过</span>';
+        return '<tr class="' + cls + '"><td>' + r.row + "</td><td>" + UI.esc(r.subject) + "</td><td>" +
+          (r.stem ? UI.esc(r.stem.slice(0, 18)) + (r.stem.length > 18 ? "…" : "") : '<span class="muted">（空）</span>') +
+          "</td><td>" + DB.diffLabel[r.difficulty] + "</td><td>" + UI.esc(r.topic || "未分类") + "</td><td>" + res + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div>";
+
+    box.innerHTML = html;
+    confirmBtn.disabled = !importState.ok;
+  }
+
+  document.getElementById("btn-import").addEventListener("click", function () {
+    importState = { file: null, ok: false };
+    renderImportPreview();
+    UI.openModal("modal-import");
+  });
+
+  document.getElementById("import-drop").addEventListener("click", function () {
+    importState.file = GOOD_FILE;
+    renderImportPreview();
+    UI.toast("已选择文件（原型模拟）");
+  });
+  document.getElementById("import-bad-demo").addEventListener("click", function () {
+    importState.file = BAD_FILE;
+    renderImportPreview();
+    UI.toast("已载入含错误行的示例文件（原型模拟）", "warn");
+  });
+
+  // 下载导入模板（CSV，6 列）
+  document.getElementById("import-tpl").addEventListener("click", function () {
+    var csv = "﻿" + "所属学科,题干,难度,主题,标签,参考答案\n" +
+      "AI应用与智能体开发,请解释什么是 RAG,中等,RAG,\"RAG,检索\",检索增强生成的示例答案\n" +
+      "AI大模型开发,什么是 LoRA,简单,微调,LoRA,低秩适配微调的示例答案\n";
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "面试题库导入模板.csv";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+    UI.toast("模板已开始下载");
+  });
+
+  document.getElementById("import-confirm").addEventListener("click", function () {
+    if (!importState.file || !importState.ok) { UI.toast("请先选择有效的导入文件", "warn"); return; }
+    var f = importState.file;
+    f.rows.forEach(function (r) {
+      list.unshift({
+        id: "iq-" + Date.now() + "-" + r.row,
+        direction: r.subject,
+        stem: r.stem,
+        refAnswer: r.ref,
+        topic: r.topic,
+        difficulty: r.difficulty,
+        tags: r.tags,
+        source: { type: "excel", file: f.name, row: r.row }
+      });
+    });
+    UI.closeModal("modal-import");
+    UI.toast("导入成功：共 " + f.rows.length + " 题");
+    page = 1;
+    render();
+  });
+
+  /* ================= 启动 ================= */
+  fillDirections();
+  fillTopics();
+  render();
+})();
+</script>
+</body>
+</html>

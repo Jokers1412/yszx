@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>题库中心 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  /* 题库中心少量页内补充样式 */
+  .q-toolbar .search-input { width: 220px; }
+  .question-card .q-tags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .an-opt-list { list-style: none; padding: 0; margin: 0 0 12px; }
+  .an-opt-list li { padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 8px; background: var(--surface); }
+  .an-opt-list li .opt-key { margin-right: 8px; }
+</style>
+</head>
+<body data-page="questions">
+<header id="site-header"></header>
+
+<div class="container" style="padding:24px 24px 64px">
+  <div class="qb-layout">
+    <aside class="card subject-panel" id="subject-panel"></aside>
+    <section id="main-view"></section>
+  </div>
+</div>
+
+<!-- 查看解析弹窗 -->
+<div class="modal-overlay" id="analyze-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>题目解析</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body" id="analyze-body"></div>
+    <div class="modal-footer">
+      <button class="btn" data-close>关闭</button>
+      <button class="btn btn-primary" id="analyze-practice-btn">开始练习</button>
+    </div>
+  </div>
+</div>
+
+<footer id="site-footer"></footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------- 视图状态 ---------------- */
+  var state = {
+    view: "stages",        // stages | questions
+    subjectId: DB.subjects[0].id,
+    stageId: null,
+    type: "all",           // all | single | multi | judge | short
+    diff: "all",           // all | easy | medium | hard
+    kw: ""
+  };
+
+  function esc(s) { return UI.esc(s); }
+  function findStage(stageId) {
+    for (var i = 0; i < DB.subjects.length; i++) {
+      var st = DB.subjects[i].stages;
+      for (var j = 0; j < st.length; j++) {
+        if (st[j].id === stageId) return { stage: st[j], subject: DB.subjects[i] };
+      }
+    }
+    return null;
+  }
+  function findSubject(id) {
+    for (var i = 0; i < DB.subjects.length; i++) if (DB.subjects[i].id === id) return DB.subjects[i];
+    return null;
+  }
+  function typeBadge(type) { return '<span class="badge badge-blue">' + DB.typeLabel[type] + "</span>"; }
+  function diffBadge(diff) {
+    var cls = { easy: "badge-green", medium: "badge-orange", hard: "badge-red" }[diff] || "badge";
+    return '<span class="badge ' + cls + '">' + DB.diffLabel[diff] + "</span>";
+  }
+  function answerText(q) {
+    if (q.type === "short") return "见参考答案";
+    if (q.type === "judge") return q.answer === "T" ? "正确" : "错误";
+    return q.answer.split("").join("、");
+  }
+
+  /* ---------------- 左侧学科栏 ---------------- */
+  function renderSubjects() {
+    var panel = document.getElementById("subject-panel");
+    panel.innerHTML = DB.subjects.map(function (s) {
+      return '<div class="subject-item' + (s.id === state.subjectId ? " active" : "") + '" data-subject="' + s.id + '">' +
+        '<span class="sb-icon">' + s.icon + "</span>" +
+        "<span>" + esc(s.name) + "</span>" +
+        '<span class="sb-count">' + s.stages.length + "</span></div>";
+    }).join("");
+  }
+
+  /* ---------------- 右侧视图 A：阶段列表 ---------------- */
+  function renderStageList() {
+    var sub = findSubject(state.subjectId);
+    var html = '<div class="subject-head">' +
+      '<div class="sh-icon">' + sub.icon + "</div>" +
+      "<div><h2 style=\"margin:0;font-size:20px\">" + esc(sub.name) + "</h2>" +
+      '<div class="muted">' + esc(sub.desc) + "</div></div>" +
+      '<div style="margin-left:auto"><span class="badge">共 ' + sub.stages.length + " 个阶段</span></div></div>";
+
+    if (!sub.stages.length) {
+      html += '<div class="card empty-state"><div class="empty-icon">📭</div>' +
+        '<div class="empty-title">该学科暂无阶段，题目正在录入中</div>' +
+        '<div class="empty-sub">请选择其他学科浏览</div></div>';
+      document.getElementById("main-view").innerHTML = html;
+      return;
+    }
+
+    html += sub.stages.map(function (st) {
+      return '<div class="stage-row">' +
+        '<div class="sr-icon">' + st.icon + "</div>" +
+        "<div><div class=\"sr-name\">" + esc(st.name) + '</div><div class="sr-sub">共 ' + st.count + " 题</div></div>" +
+        '<div style="margin-left:auto;display:flex;gap:8px">' +
+        '<button class="btn btn-sm" data-view-questions="' + st.id + '">查看题目</button>' +
+        '<button class="btn btn-primary btn-sm" data-start-practice="' + st.id + '">开始练习</button>' +
+        "</div></div>";
+    }).join("");
+    document.getElementById("main-view").innerHTML = html;
+  }
+
+  /* ---------------- 右侧视图 B：题目列表 ---------------- */
+  function filteredQuestions() {
+    return DB.questions.filter(function (q) {
+      if (q.stageId !== state.stageId) return false;
+      if (state.type !== "all" && q.type !== state.type) return false;
+      if (state.diff !== "all" && q.difficulty !== state.diff) return false;
+      if (state.kw && q.title.indexOf(state.kw) < 0) return false;
+      return true;
+    });
+  }
+
+  function renderQuestionList() {
+    var info = findStage(state.stageId);
+    var sub = info ? info.subject : findSubject(state.subjectId);
+    var stage = info ? info.stage : null;
+    var list = filteredQuestions();
+    var totalInStage = DB.questions.filter(function (q) { return q.stageId === state.stageId; }).length;
+
+    var html = '<div><a href="javascript:void(0)" id="back-stages">‹ 返回阶段列表</a></div>' +
+      '<div class="breadcrumb mt-8"><a href="javascript:void(0)" id="crumb-subject">' + esc(sub.name) + '</a><span class="sep">/</span><span class="current">' + esc(stage ? stage.name : "") + "</span></div>" +
+      '<div class="q-toolbar">' +
+      '  <select class="select" id="filter-type">' +
+      '    <option value="all"' + (state.type === "all" ? " selected" : "") + ">全部题型</option>" +
+      '    <option value="single"' + (state.type === "single" ? " selected" : "") + ">单选</option>" +
+      '    <option value="multi"' + (state.type === "multi" ? " selected" : "") + ">多选</option>" +
+      '    <option value="judge"' + (state.type === "judge" ? " selected" : "") + ">判断</option>" +
+      '    <option value="short"' + (state.type === "short" ? " selected" : "") + ">简答</option>" +
+      "  </select>" +
+      '  <select class="select" id="filter-diff">' +
+      '    <option value="all"' + (state.diff === "all" ? " selected" : "") + ">全部难度</option>" +
+      '    <option value="easy"' + (state.diff === "easy" ? " selected" : "") + ">简单</option>" +
+      '    <option value="medium"' + (state.diff === "medium" ? " selected" : "") + ">中等</option>" +
+      '    <option value="hard"' + (state.diff === "hard" ? " selected" : "") + ">困难</option>" +
+      "  </select>" +
+      '  <input class="input search-input" id="filter-kw" placeholder="搜索题干关键词" value="' + esc(state.kw) + '">' +
+      '  <span class="muted">共 ' + list.length + " 题</span>" +
+      "</div>" +
+      '<div id="q-list"></div>';
+
+    document.getElementById("main-view").innerHTML = html;
+
+    var listHtml;
+    if (!totalInStage) {
+      listHtml = '<div class="card empty-state"><div class="empty-icon">📭</div>' +
+        '<div class="empty-title">该阶段暂无题目，题目正在录入中</div>' +
+        '<div class="empty-sub">题目正在录入中，敬请期待</div></div>';
+    } else if (!list.length) {
+      listHtml = '<div class="card empty-state"><div class="empty-icon">🔍</div>' +
+        '<div class="empty-title">暂无匹配的题目，试试调整筛选条件</div>' +
+        '<div class="empty-sub">可更换题型 / 难度或清空关键词</div></div>';
+    } else {
+      listHtml = list.map(function (q, i) {
+        return '<div class="card question-card">' +
+          '<div class="q-meta"><span class="badge badge-blue">第 ' + (i + 1) + " 题</span>" + typeBadge(q.type) + diffBadge(q.difficulty) + "</div>" +
+          '<div class="q-stem">' + esc(q.title) + "</div>" +
+          '<div class="q-sub"><span>阶段：' + esc(stage ? stage.name : "") + "</span><span>" + q.done + " 人做过</span><span>正确率 " + q.accuracy + "%</span></div>" +
+          '<div class="q-tags">' + q.tags.map(function (t) { return '<span class="tag">' + esc(t) + "</span>"; }).join("") + "</div>" +
+          '<div class="q-actions">' +
+          '<button class="btn btn-sm" data-analyze="' + q.id + '">查看解析</button>' +
+          '<button class="btn btn-primary btn-sm" data-practice-q="' + q.id + '">开始练习</button>' +
+          "</div></div>";
+      }).join("");
+    }
+    document.getElementById("q-list").innerHTML = listHtml;
+
+    /* 筛选即重渲染 */
+    var typeSel = document.getElementById("filter-type");
+    var diffSel = document.getElementById("filter-diff");
+    var kwInput = document.getElementById("filter-kw");
+    typeSel.addEventListener("change", function () { state.type = this.value; renderQuestionList(); });
+    diffSel.addEventListener("change", function () { state.diff = this.value; renderQuestionList(); });
+    kwInput.addEventListener("input", UI.debounce(function () {
+      state.kw = kwInput.value.trim();
+      renderQuestionList();
+      var again = document.getElementById("filter-kw");
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    }, 250));
+    document.getElementById("back-stages").addEventListener("click", function () {
+      state.view = "stages"; state.stageId = null; renderMain();
+    });
+    document.getElementById("crumb-subject").addEventListener("click", function () {
+      state.view = "stages"; state.stageId = null; renderMain();
+    });
+  }
+
+  function renderMain() {
+    if (state.view === "questions" && state.stageId) renderQuestionList();
+    else renderStageList();
+  }
+  function renderAll() { renderSubjects(); renderMain(); }
+
+  /* ---------------- 查看解析弹窗 ---------------- */
+  var analyzeQid = null;
+  function openAnalyze(qid) {
+    var q = null;
+    for (var i = 0; i < DB.questions.length; i++) if (DB.questions[i].id === qid) q = DB.questions[i];
+    if (!q) return;
+    analyzeQid = qid;
+    var body = '<div class="q-meta" style="display:flex;gap:6px;margin-bottom:10px">' + typeBadge(q.type) + diffBadge(q.difficulty) + "</div>" +
+      '<h4 style="font-size:16px;line-height:1.7">' + esc(q.title) + "</h4>";
+    if (q.options.length) {
+      body += '<ul class="an-opt-list">' + q.options.map(function (o) {
+        return '<li><span class="opt-key" style="display:inline-flex;vertical-align:middle">' + o.key + "</span>" + esc(o.text) + "</li>";
+      }).join("") + "</ul>";
+    }
+    body += '<div class="analysis-card" style="margin-top:12px">' +
+      "<h4>正确答案</h4>" +
+      (q.type === "short"
+        ? '<p class="text-2">' + esc(q.refAnswer || q.analysis) + "</p>"
+        : '<p><strong>' + esc(answerText(q)) + "</strong></p>") +
+      "<h4>解析</h4><p class=\"mb-0 text-2\">" + esc(q.analysis) + "</p></div>";
+    document.getElementById("analyze-body").innerHTML = body;
+    UI.openModal("analyze-modal");
+  }
+
+  /* ---------------- 事件绑定 ---------------- */
+  document.getElementById("subject-panel").addEventListener("click", function (e) {
+    var item = e.target.closest("[data-subject]");
+    if (!item) return;
+    state.subjectId = item.dataset.subject;
+    state.view = "stages";
+    state.stageId = null;
+    state.type = "all"; state.diff = "all"; state.kw = "";
+    renderAll();
+  });
+
+  document.getElementById("main-view").addEventListener("click", function (e) {
+    var t;
+    if ((t = e.target.closest("[data-view-questions]"))) {
+      state.stageId = t.dataset.viewQuestions;
+      state.view = "questions";
+      state.type = "all"; state.diff = "all"; state.kw = "";
+      renderMain();
+    } else if ((t = e.target.closest("[data-start-practice]"))) {
+      location.href = "practice.html?stage=" + encodeURIComponent(t.dataset.startPractice);
+    } else if ((t = e.target.closest("[data-practice-q]"))) {
+      location.href = "practice.html?q=" + encodeURIComponent(t.dataset.practiceQ);
+    } else if ((t = e.target.closest("[data-analyze]"))) {
+      openAnalyze(parseInt(t.dataset.analyze, 10));
+    }
+  });
+
+  document.getElementById("analyze-practice-btn").addEventListener("click", function () {
+    if (analyzeQid != null) location.href = "practice.html?q=" + encodeURIComponent(analyzeQid);
+  });
+
+  /* ---------------- 入口参数：?stage=xxx 直接进入题目视图 ---------------- */
+  (function init() {
+    var params = new URLSearchParams(location.search);
+    var stageParam = params.get("stage");
+    if (stageParam) {
+      var info = findStage(stageParam);
+      if (info) {
+        state.subjectId = info.subject.id;
+        state.stageId = info.stage.id;
+        state.view = "questions";
+      }
+    }
+    renderAll();
+  })();
+})();
+</script>
+</body>
+</html>

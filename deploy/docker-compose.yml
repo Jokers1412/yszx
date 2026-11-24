@@ -1,0 +1,94 @@
+# ============================================================
+# 云枢智学 · 基础设施一键部署：MySQL 8 + Redis 7 + MinIO
+#
+# 用法（在 deploy/ 目录下）：
+#   docker compose up -d          # 一键启动三个服务
+#   docker compose ps             # 查看状态
+#   docker compose logs -f        # 查看日志
+#   docker compose down           # 停止（数据保留在命名卷）
+#   docker compose down -v        # 停止并清空数据（谨慎）
+#
+# 说明：
+#   1. MySQL 首次启动自动执行 ../scripts/sql/schema.sql（建库 yszx + 21 张表，
+#      与 docs/design/03.数据库设计.md 一致）；已有数据卷时不会重复执行。
+#   2. MySQL 服务器时区固定 UTC（03 §1.1：UTC 存储 + Asia/Shanghai 展示）。
+#   3. MinIO 启动时自动创建桶（MINIO_DEFAULT_BUCKETS）并开放匿名只读
+#      （头像/Logo 通过对象 URL 直链展示，02 D15）。
+#   4. MinIO 镜像采用 bitnamilegacy/minio（Bitnami 官方 MinIO 发行版，
+#      兼容 S3 协议与 MINIO_ROOT_USER/MINIO_ROOT_PASSWORD 凭据约定；
+#      国内镜像源普遍无法拉取 minio/* 官方镜像，故选用此发行）。
+#   5. 凭据默认值仅供开发环境；生产部署务必通过 .env 覆盖（参考 .env.example）。
+# ============================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: yszx-mysql
+    restart: unless-stopped
+    ports:
+      - "${MYSQL_HOST_PORT:-3306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-yszx_root_2026}
+      MYSQL_DATABASE: yszx
+      TZ: UTC
+    # 时区/字符集与 03 设计一致：UTC 存储、utf8mb4_0900_ai_ci
+    command:
+      - --default-time-zone=+00:00
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动自动建库建表（只读挂载）
+      - ../scripts/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: yszx-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    # AOF 持久化 + 密码
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-yszx_redis_2026}"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"${REDIS_PASSWORD:-yszx_redis_2026}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio:
+    # 固定 2025.4.8：MinIO 自 2025-05-24 起的社区版构建移除了网页控制台（9001 空响应、
+    # 日志无 Console 行），故固定到仍带控制台的版本。不要用 latest。
+    # 若该标签拉取失败，可退用 bitnamilegacy/minio:2025.2.28（同样早于控制台移除）。
+    image: bitnamilegacy/minio:2025.4.8
+    container_name: yszx-minio
+    restart: unless-stopped
+    ports:
+      - "${MINIO_API_HOST_PORT:-9000}:9000"       # S3 API
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"   # 管理控制台
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-yszx_minio_2026}
+      # 启动自动建桶并设匿名只读（download），免初始化容器
+      MINIO_DEFAULT_BUCKETS: "${MINIO_BUCKET:-yszx-assets}:download"
+    volumes:
+      - minio-data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:

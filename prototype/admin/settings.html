@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>系统设置 - 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  .upload-box {
+    width: 96px; height: 96px; border: 2px dashed var(--line-strong); border-radius: var(--radius);
+    background: var(--surface-2); display: flex; align-items: center; justify-content: center;
+    overflow: hidden; flex-shrink: 0; color: var(--ink-3); font-size: 12px;
+  }
+  .upload-box img { width: 100%; height: 100%; object-fit: cover; }
+  .upload-actions { display: flex; align-items: center; gap: 10px; }
+</style>
+</head>
+<body class="admin-body" data-page="settings">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <div class="card">
+        <div class="card-header"><h3>基本信息设置</h3></div>
+        <div class="card-body">
+          <div class="field">
+            <label class="field-label">平台名称<span class="req">*</span></label>
+            <input class="input" id="set-name" type="text" placeholder="请输入平台名称">
+            <div class="field-hint">显示在浏览器标题与 Logo 旁</div>
+            <div class="field-error" id="err-name"></div>
+          </div>
+          <div class="field">
+            <label class="field-label">平台描述</label>
+            <textarea class="textarea" id="set-desc" placeholder="请输入平台描述"></textarea>
+          </div>
+          <div class="field">
+            <label class="field-label">Logo</label>
+            <div class="upload-actions">
+              <div class="upload-box" id="logo-box"><span>未设置</span></div>
+              <div>
+                <button class="btn" type="button" data-upload="logo">选择图片</button>
+                <button class="btn-link danger hidden" type="button" data-clear="logo">移除</button>
+                <div class="field-hint">建议 256×256</div>
+              </div>
+            </div>
+            <input type="file" accept="image/*" id="file-logo" class="hidden">
+          </div>
+          <div class="field mb-0">
+            <label class="field-label">默认头像</label>
+            <div class="upload-actions">
+              <div class="upload-box" id="avatar-box"><span>未设置</span></div>
+              <div>
+                <button class="btn" type="button" data-upload="avatar">选择图片</button>
+                <button class="btn-link danger hidden" type="button" data-clear="avatar">移除</button>
+                <div class="field-hint">用户未设置头像时显示</div>
+              </div>
+            </div>
+            <input type="file" accept="image/*" id="file-avatar" class="hidden">
+          </div>
+        </div>
+        <div class="card-footer">
+          <button class="btn" id="btn-reset">重置</button>
+          <button class="btn btn-primary" id="btn-save">保存设置</button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 数据：初始值取自 DB.settings，默认值在加载时快照 ---------- */
+  var DEFAULTS = {
+    name: DB.settings.name,
+    desc: DB.settings.desc,
+    logo: DB.settings.logo,
+    avatar: DB.settings.avatar
+  };
+  var form = {
+    name: DEFAULTS.name,
+    desc: DEFAULTS.desc,
+    logo: DEFAULTS.logo,
+    avatar: DEFAULTS.avatar
+  };
+
+  /* ---------- 图片预览 ---------- */
+  function renderUpload(kind) {
+    var box = UI.$("#" + kind + "-box");
+    var val = form[kind];
+    if (val) {
+      box.innerHTML = '<img src="' + val + '" alt="' + kind + '">';
+    } else {
+      box.innerHTML = "<span>未设置</span>";
+    }
+    UI.$('[data-clear="' + kind + '"]').classList.toggle("hidden", !val);
+  }
+  function pickImage(kind) {
+    var input = UI.$("#file-" + kind);
+    input.value = "";
+    input.onchange = function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        form[kind] = e.target.result;
+        renderUpload(kind);
+        UI.toast(kind === "logo" ? "Logo 已设置（未保存）" : "默认头像已设置（未保存）");
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
+  function clearImage(kind) {
+    form[kind] = "";
+    renderUpload(kind);
+    UI.toast("已移除图片（未保存）");
+  }
+
+  /* ---------- 填充 / 读取表单 ---------- */
+  function fillForm() {
+    UI.$("#set-name").value = form.name;
+    UI.$("#set-desc").value = form.desc;
+    UI.$("#err-name").textContent = "";
+    UI.$("#set-name").classList.remove("error");
+    renderUpload("logo");
+    renderUpload("avatar");
+  }
+
+  /* ---------- 重置 ---------- */
+  function resetSettings() {
+    UI.confirm({ title: "重置设置", text: "确定要恢复默认设置吗？当前填写内容将被覆盖。", okText: "重置" })
+      .then(function (ok) {
+        if (!ok) return;
+        form = {
+          name: DEFAULTS.name,
+          desc: DEFAULTS.desc,
+          logo: DEFAULTS.logo,
+          avatar: DEFAULTS.avatar
+        };
+        DB.settings.name = DEFAULTS.name;
+        DB.settings.desc = DEFAULTS.desc;
+        DB.settings.logo = DEFAULTS.logo;
+        DB.settings.avatar = DEFAULTS.avatar;
+        fillForm();
+        UI.toast("已恢复默认设置");
+      });
+  }
+
+  /* ---------- 保存 ---------- */
+  function saveSettings() {
+    var name = UI.$("#set-name").value.trim();
+    UI.$("#err-name").textContent = "";
+    UI.$("#set-name").classList.remove("error");
+    if (!name) {
+      UI.$("#set-name").classList.add("error");
+      UI.$("#err-name").textContent = "请输入平台名称";
+      UI.toast("平台名称不能为空", "error");
+      return;
+    }
+    form.name = name;
+    form.desc = UI.$("#set-desc").value;
+    DB.settings.name = form.name;
+    DB.settings.desc = form.desc;
+    DB.settings.logo = form.logo;
+    DB.settings.avatar = form.avatar;
+    document.title = form.name;
+    UI.toast("保存成功");
+  }
+
+  /* ---------- 事件 ---------- */
+  UI.$("#set-name").addEventListener("input", function () {
+    this.classList.remove("error");
+    UI.$("#err-name").textContent = "";
+  });
+  UI.$$("[data-upload]").forEach(function (btn) {
+    btn.addEventListener("click", function () { pickImage(this.dataset.upload); });
+  });
+  UI.$$("[data-clear]").forEach(function (btn) {
+    btn.addEventListener("click", function () { clearImage(this.dataset.clear); });
+  });
+  UI.$("#btn-reset").addEventListener("click", resetSettings);
+  UI.$("#btn-save").addEventListener("click", saveSettings);
+
+  fillForm();
+})();
+</script>
+</body>
+</html>

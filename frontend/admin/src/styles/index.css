@@ -1,0 +1,24 @@
+@import './tokens.css';
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 页面占位（功能开发阶段逐页替换为原型实现） */
+.page-placeholder {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--ink-3);
+}
+
+/* 按钮内单色图标：SVG 随文字颜色（currentColor），与文字轻间距 */
+.el-button .btn-ic {
+  margin-right: 4px;
+}

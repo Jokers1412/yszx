@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学习路线 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  .route-section-title { font-size: 16px; font-weight: 600; margin: 0 0 10px; }
+  .course-list { list-style: none; margin: 0; padding: 0; }
+  .course-row.done { border-color: var(--success); }
+  .course-row.done .c-title::after { content: " ✓"; color: var(--success); }
+  .route-head .rh-progress-line {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; color: var(--ink-2); margin: 4px 0 8px;
+  }
+  .route-head h2 .rh-icon { margin-right: 6px; }
+  @media (max-width: 900px) {
+    .route-subject-grid { grid-template-columns: repeat(3, 1fr); }
+    .course-row { flex-wrap: wrap; }
+  }
+  /* 封面图占满 .c-cover */
+  .course-row .c-cover { padding: 0; overflow: hidden; }
+  .course-row .c-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+</style>
+</head>
+<body data-page="routes">
+<header id="site-header"></header>
+
+<div class="container" style="padding:24px 24px 64px">
+
+  <h1 style="font-size:22px" class="mb-16">学习路线</h1>
+
+  <!-- 选择学科 -->
+  <h3 class="route-section-title">选择学科</h3>
+  <div class="route-subject-grid" id="subject-grid"></div>
+
+  <!-- 路线详情 -->
+  <div id="route-detail"></div>
+
+</div>
+
+<footer id="site-footer"></footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 页面状态（内存态，刷新恢复初始） ---------- */
+  var state = {
+    subjectId: null,   // 当前选中学科
+    routeId: null      // 当前选中路线（Tab）
+  };
+
+  /* ---------- 工具 ---------- */
+  function enabledRoutesOf(subjectId) {
+    return DB.routes.filter(function (r) {
+      return r.subjectId === subjectId && r.status === "enabled";
+    });
+  }
+  /* 默认选中「最近学习」的路线：learned 非空优先，同组取 updatedAt 最新 */
+  function pickDefaultRoute(list) {
+    var best = null;
+    list.forEach(function (r) {
+      if (!best) { best = r; return; }
+      var la = (r.learned && r.learned.length) ? 1 : 0;
+      var lb = (best.learned && best.learned.length) ? 1 : 0;
+      if (la !== lb) { if (la > lb) best = r; return; }
+      if (String(r.updatedAt || "") > String(best.updatedAt || "")) best = r;
+    });
+    return best;
+  }
+  function courseOf(cid) {
+    for (var i = 0; i < DB.courses.length; i++) {
+      if (DB.courses[i].id === cid) return DB.courses[i];
+    }
+    return null;
+  }
+  /* 课程封面图：优先 coverUrl，缺失时生成渐变封面占位图（非 icon） */
+  function coverUri(c) {
+    if (c.coverUrl) return c.coverUrl;
+    var grads = [
+      ["#2a78d6", "#6250d6"], ["#eb6834", "#e34948"], ["#1baf7a", "#2a78d6"],
+      ["#6250d6", "#e87ba4"], ["#eda100", "#eb6834"], ["#008300", "#1baf7a"]
+    ];
+    var h = 0;
+    for (var i = 0; i < c.id.length; i++) h = (h * 31 + c.id.charCodeAt(i)) >>> 0;
+    var g = grads[h % grads.length];
+    var t = c.title.length > 11 ? c.title.slice(0, 11) + "…" : c.title;
+    t = String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="168" height="96" viewBox="0 0 168 96">' +
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+      '<stop offset="0" stop-color="' + g[0] + '"/><stop offset="1" stop-color="' + g[1] + '"/>' +
+      "</linearGradient></defs>" +
+      '<rect width="168" height="96" fill="url(#g)"/>' +
+      '<text x="84" y="53" font-size="13" fill="#ffffff" text-anchor="middle" font-family="sans-serif">' + t + "</text>" +
+      "</svg>";
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+  /* 「x 小时 y 分钟」 */
+  function fmtTotalMin(totalMin) {
+    var h = Math.floor(totalMin / 60), m = totalMin % 60;
+    if (h > 0) return m > 0 ? h + " 小时 " + m + " 分钟" : h + " 小时";
+    return m + " 分钟";
+  }
+
+  /* ---------- 学科卡 ---------- */
+  function renderSubjects() {
+    document.getElementById("subject-grid").innerHTML = DB.subjects.map(function (s) {
+      var m = enabledRoutesOf(s.id).length;
+      var cls = "route-subject-card";
+      if (state.subjectId === s.id) cls += " active";
+      if (m === 0) cls += " disabled-sub";
+      return '<div class="' + cls + '" data-sub="' + s.id + '">' +
+        '<div class="rs-icon">' + s.icon + "</div>" +
+        '<div class="rs-name">' + UI.esc(s.name) + "</div>" +
+        '<div class="rs-count">' + m + " 条路线</div>" +
+        "</div>";
+    }).join("");
+  }
+
+  /* ---------- 路线详情 ---------- */
+  function renderDetail() {
+    var host = document.getElementById("route-detail");
+
+    /* 未选学科 */
+    if (!state.subjectId) {
+      host.innerHTML =
+        '<div class="empty-state card">' +
+        '  <div class="empty-icon">🧭</div>' +
+        '  <div class="empty-title">请选择一个学科方向</div>' +
+        '  <div class="empty-sub">在上方学科卡片中选择一个方向，查看该学科的学习路线</div>' +
+        "</div>";
+      return;
+    }
+
+    var routes = enabledRoutesOf(state.subjectId);
+    /* 无启用路线 */
+    if (!routes.length) {
+      host.innerHTML =
+        '<div class="empty-state card">' +
+        '  <div class="empty-icon">🚧</div>' +
+        '  <div class="empty-title">该学科暂无学习路线</div>' +
+        '  <div class="empty-sub">路线筹备中，敬请期待</div>' +
+        "</div>";
+      return;
+    }
+
+    /* 定位当前路线（Tab） */
+    var route = null;
+    routes.forEach(function (r) { if (r.id === state.routeId) route = r; });
+    if (!route) {
+      route = pickDefaultRoute(routes);
+      state.routeId = route.id;
+    }
+
+    var learned = route.learned || [];
+    var total = route.courseIds.length;
+    var done = learned.length;
+    var pct = total ? Math.round(done / total * 100) : 0;
+    var totalMin = 0;
+    route.courseIds.forEach(function (cid) {
+      var c = courseOf(cid);
+      if (c) totalMin += c.durationMin || 0;
+    });
+
+    /* Tab（路线名 + 进度 N/M 徽标） */
+    var html = '<div class="tabs mb-16" id="route-tabs">' + routes.map(function (r) {
+      var n = (r.learned || []).length, m = r.courseIds.length;
+      return '<button class="tab' + (r.id === route.id ? " active" : "") + '" data-route="' + r.id + '">' +
+        '<span class="route-tab">' + UI.esc(r.name) +
+        ' <span class="badge badge-blue">' + n + "/" + m + "</span></span></button>";
+    }).join("") + "</div>";
+
+    /* 路线头部 */
+    html +=
+      '<div class="card route-head">' +
+      "  <h2 style=\"margin:0 0 8px;font-size:22px\"><span class=\"rh-icon\">" + route.icon + "</span>" + UI.esc(route.name) + "</h2>" +
+      '  <div class="text-2 mb-8"><strong>适合人群：</strong>' + UI.esc(route.audience) + "</div>" +
+      '  <p class="text-2 mb-0">' + UI.esc(route.desc) + "</p>" +
+      '  <div class="rh-stats">' +
+      "    <span>共 " + total + " 门课程</span>" +
+      "    <span>总计时长 " + fmtTotalMin(totalMin) + "</span>" +
+      "    <span>按列表顺序学习</span>" +
+      "  </div>" +
+      '  <div class="rh-progress-line"><span>学习进度 <strong>' + done + "/" + total + '</strong></span><span class="muted">' + pct + "%</span></div>" +
+      '  <div class="progress"><div class="progress-bar' + (total > 0 && done >= total ? " success" : "") + '" style="width:' + pct + '%"></div></div>' +
+      "</div>";
+
+    /* 课程列表 */
+    if (!route.courseIds.length) {
+      html +=
+        '<div class="empty-state card">' +
+        '  <div class="empty-icon">📦</div>' +
+        '  <div class="empty-title">课程筹备中，敬请期待</div>' +
+        "</div>";
+    } else {
+      html += '<ol class="course-list">' + route.courseIds.map(function (cid, i) {
+        var c = courseOf(cid);
+        if (!c) return "";
+        var ok = learned.indexOf(cid) >= 0;
+        return '<li class="course-row' + (ok ? " done" : "") + '">' +
+          '<div class="c-index">' + (i + 1) + "</div>" +
+          '<div class="c-cover"><img src="' + coverUri(c) + '" alt="' + UI.esc(c.title) + ' 封面"></div>' +
+          '<div style="flex:1;min-width:0">' +
+          '  <div class="c-title">' + UI.esc(c.title) + "</div>" +
+          '  <div class="c-sub"><span>时长 ' + UI.esc(c.duration) + "</span></div>" +
+          "</div>" +
+          '<button class="btn btn-sm" data-open="' + c.id + '"' + (c.url ? "" : " disabled") + ">去B站学习</button>" +
+          (ok
+            ? '<button class="btn btn-sm" disabled>✓ 已学完</button>'
+            : '<button class="btn btn-primary btn-sm" data-learn="' + c.id + '">标记已学完</button>') +
+          "</li>";
+      }).join("") + "</ol>";
+    }
+
+    host.innerHTML = html;
+  }
+
+  /* ---------- 标记已学完 ---------- */
+  function markLearned(courseId) {
+    var route = DB.routes.filter(function (r) { return r.id === state.routeId; })[0];
+    var c = courseOf(courseId);
+    if (!route || !c) return;
+    UI.confirm({
+      title: "标记已学完",
+      text: "确定将《" + c.title + "》标记为已学完吗？仅可标记、不可取消。",
+      okText: "标记已学完"
+    }).then(function (ok) {
+      if (!ok) return;
+      if (!route.learned) route.learned = [];
+      if (route.learned.indexOf(courseId) < 0) route.learned.push(courseId);
+      UI.toast("已标记为已学完");
+      /* 路线 Tab 与路线头部进度同步刷新 */
+      renderDetail();
+    });
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  function bindEvents() {
+    /* 学科单选切换 */
+    document.getElementById("subject-grid").addEventListener("click", function (e) {
+      var card = e.target.closest("[data-sub]");
+      if (!card) return;
+      state.subjectId = card.dataset.sub;
+      state.routeId = null;  // 切学科后重新选默认路线
+      renderSubjects();
+      renderDetail();
+    });
+
+    /* 路线详情区交互（Tab 切换 / 去B站学习 / 标记已学完） */
+    document.getElementById("route-detail").addEventListener("click", function (e) {
+      var tab = e.target.closest("[data-route]");
+      if (tab) {
+        state.routeId = tab.dataset.route;
+        renderDetail();
+        return;
+      }
+      var openBtn = e.target.closest("[data-open]");
+      if (openBtn) {
+        var c = courseOf(openBtn.dataset.open);
+        if (c && c.url) window.open(c.url, "_blank");
+        return;
+      }
+      var learnBtn = e.target.closest("[data-learn]");
+      if (learnBtn) markLearned(learnBtn.dataset.learn);
+    });
+  }
+
+  /* ---------- 启动 ---------- */
+  function init() {
+    renderSubjects();
+    renderDetail();
+    bindEvents();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

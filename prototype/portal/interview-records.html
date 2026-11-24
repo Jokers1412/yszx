@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面试记录 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+  .rec-list { display: flex; flex-direction: column; gap: 10px; }
+  .rec-main { flex: 1; min-width: 0; }
+  .rec-title { font-weight: 600; font-size: 14px; }
+  .rec-meta { font-size: 12px; color: var(--ink-3); display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+  .rec-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  @media (max-width: 900px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body data-page="interview-records">
+<header id="site-header"></header>
+<div class="container" style="padding:24px 24px 64px">
+
+  <div class="flex-between mb-16" style="flex-wrap:wrap;gap:12px">
+    <div>
+      <h1 style="margin-bottom:4px">面试记录</h1>
+      <div class="muted">回顾历次 AI 模拟面试成绩，随时再开一场</div>
+    </div>
+    <a class="btn btn-primary" href="interview-config.html">开始AI面试</a>
+  </div>
+
+  <div class="stat-grid">
+    <div class="card stat-card">
+      <div class="stat-label">面试总次数</div>
+      <div class="stat-value" id="st-total">0</div>
+      <div class="stat-sub">累计 AI 模拟面试场次</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-label">平均分数</div>
+      <div class="stat-value" id="st-avg">0</div>
+      <div class="stat-sub">综合评分均值（百分制）</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-label">最高分数</div>
+      <div class="stat-value" id="st-max">0</div>
+      <div class="stat-sub">历史最佳成绩</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-label">累计时长</div>
+      <div class="stat-value" id="st-duration">0</div>
+      <div class="stat-sub">全部面试用时合计</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>全部记录</h3><span class="muted" id="rec-count">共 7 条</span></div>
+    <div class="card-body">
+      <div class="rec-list" id="rec-list"></div>
+      <div class="empty-state hidden" id="rec-empty">
+        <div class="empty-icon">🎙️</div>
+        <div class="empty-title">暂无面试记录</div>
+        <div class="empty-sub">完成一次 AI 模拟面试后，记录会出现在这里</div>
+        <button class="btn btn-primary mt-16" onclick="location.href='interview-config.html'">开始AI面试</button>
+      </div>
+    </div>
+    <div class="card-footer" style="justify-content:center">
+      <div class="pagination" id="pager" style="width:100%"></div>
+    </div>
+  </div>
+
+</div>
+<footer id="site-footer"></footer>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+  if (!YS.auth.requireLogin()) return;
+
+  var LS_CFG = "yszx_iv_config", LS_SESSION = "yzsx_iv_session";
+  var recs = DB.interviewRecords.slice();
+  var pageSize = 5, page = 1;
+
+  /* ---------- 统计卡片 ---------- */
+  var totalSec = recs.reduce(function (a, r) { return a + r.durationSec; }, 0);
+  UI.animateNumber(UI.$("#st-total"), recs.length, {});
+  if (recs.length) {
+    UI.animateNumber(UI.$("#st-avg"), recs.reduce(function (a, r) { return a + r.score; }, 0) / recs.length, { decimals: 1 });
+    UI.animateNumber(UI.$("#st-max"), Math.max.apply(null, recs.map(function (r) { return r.score; })), {});
+    UI.$("#st-duration").textContent = (totalSec / 3600).toFixed(1) + " 小时";
+  }
+
+  /* ---------- 列表 ---------- */
+  function dotCls(score) { return score >= 80 ? "score-high" : (score >= 60 ? "score-mid" : "score-low"); }
+  function diffBadge(d) {
+    var cls = d === "easy" ? "badge-green" : (d === "hard" ? "badge-orange" : "badge-blue");
+    return '<span class="badge ' + cls + '">' + UI.esc(DB.diffLabel[d] || d) + "</span>";
+  }
+  function renderList() {
+    var host = UI.$("#rec-list");
+    if (!recs.length) {
+      host.innerHTML = "";
+      UI.$("#rec-empty").classList.remove("hidden");
+      UI.$("#pager").innerHTML = "";
+      UI.$("#rec-count").textContent = "共 0 条";
+      return;
+    }
+    var start = (page - 1) * pageSize;
+    var rows = recs.slice(start, start + pageSize);
+    host.innerHTML = rows.map(function (r) {
+      return '<div class="list-row" data-id="' + r.id + '">' +
+        '<div class="score-dot ' + dotCls(r.score) + '">' + r.score + "</div>" +
+        '<div class="rec-main">' +
+        '<div class="rec-title">' + UI.esc(r.direction + " · " + (DB.diffLabel[r.difficulty] || r.difficulty)) + "</div>" +
+        '<div class="rec-meta"><span>🕒 ' + UI.esc(r.datetime) + "</span><span>⏱ " + UI.fmtHumanDur(r.durationSec) +
+        "</span><span>📝 " + r.count + " 题</span>" + diffBadge(r.difficulty) + "</div></div>" +
+        '<div class="rec-actions">' +
+        '<button class="btn btn-sm" data-act="report">查看报告</button>' +
+        '<button class="btn btn-primary btn-sm" data-act="again">再来一次</button>' +
+        "</div></div>";
+    }).join("");
+    UI.$("#rec-count").textContent = "共 " + recs.length + " 条";
+    UI.pager(UI.$("#pager"), {
+      total: recs.length, page: page, pageSize: pageSize,
+      onChange: function (p) { page = p; renderList(); }
+    });
+  }
+  UI.$("#rec-list").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    var row = btn.closest(".list-row");
+    var rec = null;
+    recs.forEach(function (r) { if (r.id === row.dataset.id) rec = r; });
+    if (!rec) return;
+    if (btn.dataset.act === "report") {
+      location.href = "interview-report.html";
+    } else {
+      /* 再来一次：按该记录的配置直接再开一场 */
+      localStorage.setItem(LS_CFG, JSON.stringify({
+        direction: rec.direction,
+        difficulty: rec.difficulty,
+        difficultyName: DB.diffLabel[rec.difficulty] || rec.difficulty,
+        count: rec.count,
+        timeout: 5
+      }));
+      localStorage.removeItem(LS_SESSION);
+      location.href = "interview.html";
+    }
+  });
+  renderList();
+})();
+</script>
+</body>
+</html>

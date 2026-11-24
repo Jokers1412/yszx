@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云枢智学 · 页面原型导航</title>
+<link rel="stylesheet" href="assets/css/base.css">
+<style>
+  .entry-hero {
+    background: var(--brand-grad); color: #fff; padding: 56px 24px 72px; text-align: center;
+  }
+  .entry-hero h1 { color: #fff; font-size: 34px; margin-bottom: 10px; }
+  .entry-hero p { opacity: .88; font-size: 15px; margin: 0; }
+  .entry-wrap { max-width: 960px; margin: -40px auto 64px; padding: 0 24px; }
+  .entry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .entry-card { padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+  .entry-card .ec-head { display: flex; align-items: center; gap: 12px; }
+  .entry-card .ec-icon {
+    width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center;
+    justify-content: center; font-size: 24px; background: var(--brand-light);
+  }
+  .entry-card h2 { font-size: 19px; margin: 0; }
+  .entry-card .ec-sub { color: var(--ink-3); font-size: 13px; margin: 0; }
+  .entry-links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .entry-links a {
+    padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px;
+    color: var(--ink-2); background: var(--surface-2);
+  }
+  .entry-links a:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-light); }
+  .entry-note {
+    margin-top: 24px; padding: 18px 22px; border-radius: var(--radius);
+    background: var(--info-bg); color: var(--brand-dark); font-size: 13px; line-height: 2;
+  }
+  .entry-foot { text-align: center; color: var(--ink-3); font-size: 12px; padding-bottom: 40px; }
+  @media (max-width: 760px) { .entry-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <div class="entry-hero">
+    <h1>云枢智学 · 页面原型导航</h1>
+    <p>AI 赋能的智能面试训练平台 — 可交互页面原型（纯 HTML / CSS / JS，无服务端逻辑）</p>
+  </div>
+
+  <div class="entry-wrap">
+    <div class="entry-grid">
+      <!-- 学员端 -->
+      <div class="card entry-card">
+        <div class="ec-head">
+          <div class="ec-icon">🎓</div>
+          <div>
+            <h2>学员端</h2>
+            <p class="ec-sub">portal/ · 首页、刷题、错题本、学习路线、AI 模拟面试、个人中心</p>
+          </div>
+        </div>
+        <a class="btn btn-primary btn-block" href="portal/index.html">进入学员端首页 →</a>
+        <div class="entry-links">
+          <a href="portal/index.html">首页</a>
+          <a href="portal/login.html">登录</a>
+          <a href="portal/register.html">注册</a>
+          <a href="portal/forgot-password.html">找回密码</a>
+          <a href="portal/questions.html">题库中心</a>
+          <a href="portal/practice.html">刷题练习</a>
+          <a href="portal/wrongbook.html">错题本</a>
+          <a href="portal/routes.html">学习路线</a>
+          <a href="portal/interview-config.html">AI 面试</a>
+          <a href="portal/interview-report.html">面试报告</a>
+          <a href="portal/interview-records.html">面试记录</a>
+          <a href="portal/profile.html">个人中心</a>
+        </div>
+      </div>
+
+      <!-- 管理端 -->
+      <div class="card entry-card">
+        <div class="ec-head">
+          <div class="ec-icon">🖥️</div>
+          <div>
+            <h2>管理端</h2>
+            <p class="ec-sub">admin/ · 数据看板、内容管理、学员管理、系统管理（登录后进入）</p>
+          </div>
+        </div>
+        <a class="btn btn-primary btn-block" href="admin/login.html">进入管理端登录 →</a>
+        <div class="entry-links">
+          <a href="admin/login.html">后台登录</a>
+          <a href="admin/dashboard.html">数据看板</a>
+          <a href="admin/subjects.html">学科管理</a>
+          <a href="admin/courses.html">B站课程库</a>
+          <a href="admin/questions.html">题库管理</a>
+          <a href="admin/interview-questions.html">面试题库</a>
+          <a href="admin/routes.html">学习路线</a>
+          <a href="admin/students.html">学员管理</a>
+          <a href="admin/users.html">用户管理</a>
+          <a href="admin/roles.html">角色管理</a>
+          <a href="admin/logs.html">操作日志</a>
+          <a href="admin/settings.html">系统设置</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="entry-note">
+      <b>原型演示说明</b><br>
+      · 两端均自动以演示账号登录（学员「林小雨」/ 管理员「admin」），退出登录后可体验完整登录流程；任意非空账号密码均可登录。<br>
+      · 登录失败锁定演示：在登录页连续 5 次使用密码 <code>000000</code> 提交。<br>
+      · AI 简答批改、模拟面试问答为脚本化模拟；练习进度、面试会话按需求文档做本地持久化（localStorage）。<br>
+      · 目录结构与「原型 vs 真实实现」差异详见本目录下 <code>README.md</code>；建议使用 Chrome / Edge 浏览器打开。
+    </div>
+
+    <div class="entry-foot">© 2026 云枢智学 · 仅原型演示</div>
+  </div>
+</body>
+</html>

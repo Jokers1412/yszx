@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用户管理 - 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  #batch-bar { margin-bottom: 12px; }
+  .user-name { display: inline-flex; align-items: center; gap: 8px; }
+  .user-name .btn-link { font-size: 14px; font-weight: 600; }
+</style>
+</head>
+<body class="admin-body" data-page="users">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <div class="filter-bar">
+        <input class="input search-input" id="f-kw" type="text" placeholder="搜索用户名 / 手机号">
+        <select class="select" id="f-role">
+          <option value="all">全部角色</option>
+          <option value="超级管理员">超级管理员</option>
+          <option value="内容审核">内容审核</option>
+          <option value="运营人员">运营人员</option>
+        </select>
+        <select class="select" id="f-status">
+          <option value="all">全部状态</option>
+          <option value="enabled">已启用</option>
+          <option value="disabled">已禁用</option>
+        </select>
+      </div>
+
+      <div class="toolbar-row">
+        <div class="toolbar-right">
+          <button class="btn btn-primary" id="btn-add">+ 新增用户</button>
+        </div>
+      </div>
+
+      <div class="batch-bar hidden" id="batch-bar">
+        <span class="batch-count" id="batch-count">已选择 0 项</span>
+        <button class="btn btn-sm" data-batch="enable">批量启用</button>
+        <button class="btn btn-sm" data-batch="disable">批量禁用</button>
+        <button class="btn btn-sm btn-soft-danger" data-batch="delete">批量删除</button>
+        <button class="btn btn-sm btn-ghost" data-batch="cancel">取消选择</button>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table class="table" id="user-table">
+            <thead>
+              <tr>
+                <th class="col-check"><input type="checkbox" id="check-all"></th>
+                <th>用户</th>
+                <th>手机号</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>最后登录</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="user-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pager"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- 新增 / 编辑用户弹窗 -->
+<div class="modal-overlay" id="user-modal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="user-modal-title">新增用户</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">用户名<span class="req">*</span></label>
+        <input class="input" id="u-name" type="text" placeholder="请输入用户名">
+        <div class="field-error" id="err-name"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">手机号<span class="req">*</span></label>
+        <input class="input" id="u-phone" type="text" placeholder="请输入手机号">
+        <div class="field-error" id="err-phone"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">邮箱</label>
+        <input class="input" id="u-email" type="text" placeholder="选填">
+      </div>
+      <div class="field">
+        <label class="field-label">角色<span class="req">*</span></label>
+        <select class="select" id="u-role">
+          <option value="">请选择角色</option>
+          <option value="内容审核">内容审核</option>
+          <option value="运营人员">运营人员</option>
+        </select>
+        <div class="field-hint" id="hint-role"></div>
+        <div class="field-error" id="err-role"></div>
+      </div>
+      <div class="field">
+        <label class="field-label" id="label-pwd">密码<span class="req">*</span></label>
+        <input class="input" id="u-pwd" type="password" placeholder="至少 6 位">
+        <div class="field-hint" id="hint-pwd"></div>
+        <div class="field-error" id="err-pwd"></div>
+      </div>
+      <div class="field mb-0">
+        <label class="field-label">状态</label>
+        <label class="switch"><input type="checkbox" id="u-status" checked><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close>取消</button>
+      <button class="btn btn-primary" id="btn-save-user">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 用户详情弹窗 -->
+<div class="modal-overlay" id="detail-modal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>用户详情</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body" id="detail-body"></div>
+    <div class="modal-footer">
+      <button class="btn" data-close>关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 数据：从 DB 拷贝到内存操作 ---------- */
+  function cloneArr(arr) {
+    return arr.map(function (o) { var c = {}; for (var k in o) c[k] = o[k]; return c; });
+  }
+  var list = cloneArr(DB.adminUsers);
+  var filters = { kw: "", role: "all", status: "all" };
+  var page = 1, pageSize = 3;
+  var selected = {};   // id -> true，跨页保留勾选
+  var mode = "create", editId = null;
+  var nextSeq = 100;
+
+  /* ---------- 工具 ---------- */
+  function statusBadge(st) {
+    return st === "enabled"
+      ? '<span class="badge badge-green">已启用</span>'
+      : '<span class="badge badge-red">已禁用</span>';
+  }
+  function roleBadge(role) {
+    var cls = role === "超级管理员" ? "badge-blue" : (role === "内容审核" ? "badge-green" : "badge-orange");
+    return '<span class="badge ' + cls + '">' + UI.esc(role) + "</span>";
+  }
+  function find(id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+  function filtered() {
+    var kw = filters.kw.trim().toLowerCase();
+    return list.filter(function (u) {
+      if (filters.role !== "all" && u.role !== filters.role) return false;
+      if (filters.status !== "all" && u.status !== filters.status) return false;
+      if (kw && u.username.toLowerCase().indexOf(kw) < 0 && u.phone.indexOf(kw) < 0) return false;
+      return true;
+    });
+  }
+  function selIds() {
+    return Object.keys(selected).filter(function (id) { return selected[id]; });
+  }
+
+  /* ---------- 列表渲染 ---------- */
+  function render() {
+    var rows = filtered();
+    var total = rows.length;
+    var pages = Math.max(1, Math.ceil(total / pageSize));
+    if (page > pages) page = pages;
+    var slice = rows.slice((page - 1) * pageSize, page * pageSize);
+
+    var html = slice.map(function (u) {
+      return '<tr data-id="' + u.id + '">' +
+        '<td class="col-check"><input type="checkbox" data-check="' + u.id + '"' + (selected[u.id] ? " checked" : "") + "></td>" +
+        '<td><span class="user-name"><span class="avatar sm">' + UI.esc(u.username.slice(0, 1)) + '</span><button class="btn-link" data-act="detail" title="点击查看详情">' + UI.esc(u.username) + "</button></span></td>" +
+        "<td>" + UI.esc(u.phone) + "</td>" +
+        "<td>" + roleBadge(u.role) + "</td>" +
+        "<td>" + statusBadge(u.status) + "</td>" +
+        '<td class="nowrap">' + UI.esc(u.lastLogin || "—") + "</td>" +
+        '<td class="cell-actions">' +
+          '<button class="btn-link" data-act="edit">编辑</button>' +
+          (u.status === "enabled"
+            ? '<button class="btn-link danger" data-act="disable">禁用</button>'
+            : '<button class="btn-link" data-act="enable">启用</button>') +
+          '<button class="btn-link" data-act="reset">重置密码</button>' +
+          '<button class="btn-link danger" data-act="delete">删除</button>' +
+        "</td></tr>";
+    }).join("");
+
+    if (!slice.length) {
+      html = '<tr><td colspan="7"><div class="empty-state">' +
+        '<div class="empty-icon">🔍</div>' +
+        '<div class="empty-title">没有找到匹配的用户</div>' +
+        "</div></td></tr>";
+    }
+    UI.$("#user-tbody").innerHTML = html;
+
+    var ids = slice.map(function (u) { return u.id; });
+    var all = ids.length > 0 && ids.every(function (id) { return selected[id]; });
+    var some = ids.some(function (id) { return selected[id]; });
+    var ca = UI.$("#check-all");
+    ca.checked = all;
+    ca.indeterminate = !all && some;
+
+    var cnt = selIds().length;
+    UI.$("#batch-bar").classList.toggle("hidden", cnt === 0);
+    UI.$("#batch-count").textContent = "已选择 " + cnt + " 项";
+
+    UI.pager(UI.$("#pager"), {
+      total: total, page: page, pageSize: pageSize,
+      onChange: function (p) { page = p; render(); }
+    });
+  }
+
+  /* ---------- 行 / 批量操作（均二次确认） ---------- */
+  function rowAct(act, id) {
+    var u = find(id);
+    if (!u) return;
+    if (act === "detail") { openDetail(id); return; }
+    if (act === "edit") { openForm("edit", id); return; }
+    if (act === "enable" || act === "disable") {
+      var st = act === "enable" ? "enabled" : "disabled";
+      var label = act === "enable" ? "启用" : "禁用";
+      UI.confirm({ title: label + "用户", text: "确定要" + label + "用户「" + u.username + "」吗？", okText: label })
+        .then(function (ok) {
+          if (!ok) return;
+          u.status = st;
+          UI.toast("已" + label);
+          render();
+        });
+    } else if (act === "reset") {
+      UI.confirm({ title: "重置密码", text: "将密码重置为默认密码？", okText: "重置" })
+        .then(function (ok) {
+          if (ok) UI.toast("已重置为默认密码");
+        });
+    } else if (act === "delete") {
+      UI.confirm({ title: "删除用户", text: "确定要删除用户「" + u.username + "」吗？", okText: "删除", danger: true })
+        .then(function (ok) {
+          if (!ok) return;
+          list = list.filter(function (x) { return x.id !== id; });
+          delete selected[id];
+          UI.toast("已删除");
+          render();
+        });
+    }
+  }
+  function batchAct(act) {
+    var ids = selIds();
+    if (act === "cancel") { selected = {}; render(); return; }
+    if (!ids.length) { UI.toast("请先勾选用户", "warn"); return; }
+    var n = ids.length;
+    if (act === "enable" || act === "disable") {
+      var st = act === "enable" ? "enabled" : "disabled";
+      var label = act === "enable" ? "启用" : "禁用";
+      UI.confirm({ title: "批量" + label, text: "确定要" + label + "选中的 " + n + " 个用户吗？", okText: "批量" + label })
+        .then(function (ok) {
+          if (!ok) return;
+          ids.forEach(function (id) { var u = find(id); if (u) u.status = st; });
+          selected = {};
+          UI.toast("已批量" + label + " " + n + " 项");
+          render();
+        });
+    } else if (act === "delete") {
+      UI.confirm({ title: "批量删除", text: "确定要删除选中的 " + n + " 个用户吗？", okText: "批量删除", danger: true })
+        .then(function (ok) {
+          if (!ok) return;
+          list = list.filter(function (u) { return !selected[u.id]; });
+          selected = {};
+          UI.toast("已批量删除 " + n + " 项");
+          render();
+        });
+    }
+  }
+
+  /* ---------- 新增 / 编辑弹窗 ---------- */
+  function clearErr() {
+    ["name", "phone", "role", "pwd"].forEach(function (k) {
+      UI.$("#err-" + k).textContent = "";
+      var input = UI.$("#u-" + k);
+      if (input) input.classList.remove("error");
+    });
+  }
+  function setErr(k, msg) {
+    UI.$("#err-" + k).textContent = msg;
+    UI.$("#u-" + k).classList.add("error");
+  }
+  function openForm(m, id) {
+    mode = m;
+    editId = id || null;
+    clearErr();
+    var u = id ? find(id) : null;
+    UI.$("#user-modal-title").textContent = m === "create" ? "新增用户" : "编辑用户";
+    UI.$("#u-name").value = u ? u.username : "";
+    UI.$("#u-phone").value = u ? u.phone : "";
+    UI.$("#u-email").value = u ? (u.email || "") : "";
+    UI.$("#u-pwd").value = "";
+    UI.$("#u-status").checked = u ? u.status === "enabled" : true;
+
+    var roleSel = UI.$("#u-role");
+    var isBuiltin = !!(u && u.builtin);
+    roleSel.disabled = isBuiltin;
+    UI.$("#hint-role").textContent = isBuiltin ? "系统内置账号，角色不可修改" : "";
+    if (isBuiltin) {
+      /* 内置账号：仅回显当前角色（只读），不提供切换项 */
+      roleSel.innerHTML = '<option value="' + UI.esc(u.role) + '" selected>' + UI.esc(u.role) + "</option>";
+    } else {
+      roleSel.innerHTML = '<option value="">请选择角色</option>' +
+        '<option value="内容审核">内容审核</option>' +
+        '<option value="运营人员">运营人员</option>';
+      roleSel.value = u ? u.role : "";
+    }
+
+    /* 编辑时密码字段为「新密码」，选填 */
+    if (m === "edit") {
+      UI.$("#label-pwd").innerHTML = '新密码<span class="muted" style="font-weight:400">（选填）</span>';
+      UI.$("#u-pwd").placeholder = "留空则不修改密码";
+      UI.$("#hint-pwd").textContent = "留空则不修改密码";
+    } else {
+      UI.$("#label-pwd").innerHTML = '密码<span class="req">*</span>';
+      UI.$("#u-pwd").placeholder = "至少 6 位";
+      UI.$("#hint-pwd").textContent = "";
+    }
+    UI.openModal("user-modal");
+  }
+  function saveUser() {
+    clearErr();
+    var cur = editId ? find(editId) : null;
+    var isBuiltinEdit = !!(cur && cur.builtin);
+    var name = UI.$("#u-name").value.trim();
+    var phone = UI.$("#u-phone").value.trim();
+    var email = UI.$("#u-email").value.trim();
+    var role = UI.$("#u-role").value;
+    var pwd = UI.$("#u-pwd").value;
+    var status = UI.$("#u-status").checked ? "enabled" : "disabled";
+    var errs = [];
+    if (!name) { setErr("name", "请输入用户名"); errs.push("请输入用户名"); }
+    if (!phone) { setErr("phone", "请输入手机号"); errs.push("请输入手机号"); }
+    if (!role && !isBuiltinEdit) { setErr("role", "请选择角色"); errs.push("请选择角色"); }
+    if (mode === "create" && !pwd) { setErr("pwd", "请输入密码"); errs.push("请输入密码"); }
+    if (pwd && pwd.length < 6) { setErr("pwd", "密码长度至少 6 位"); errs.push("密码长度至少 6 位"); }
+    if (errs.length) { UI.toast(errs[0], "error"); return; }
+
+    if (mode === "create") {
+      var id = "au-" + (++nextSeq);
+      while (find(id)) id = "au-" + (++nextSeq);
+      list.unshift({
+        id: id, username: name, phone: phone, email: email, role: role,
+        status: status, lastLogin: "", createdAt: UI.todayStr(), builtin: false
+      });
+      UI.closeModal("user-modal");
+      UI.toast("新增用户成功");
+    } else {
+      var u = find(editId);
+      if (u) {
+        u.username = name;
+        u.phone = phone;
+        u.email = email;
+        if (!u.builtin) u.role = role;
+        u.status = status;
+      }
+      UI.closeModal("user-modal");
+      UI.toast("保存成功");
+    }
+    page = 1;
+    render();
+  }
+
+  /* ---------- 用户详情弹窗 ---------- */
+  function openDetail(id) {
+    var u = find(id);
+    if (!u) return;
+    var logs = DB.logs.filter(function (l) { return l.user === u.username; });
+    var html =
+      '<dl class="desc-list">' +
+        '<dt>头像</dt><dd><span class="avatar sm">' + UI.esc(u.username.slice(0, 1)) + "</span></dd>" +
+        "<dt>用户名</dt><dd>" + UI.esc(u.username) + "</dd>" +
+        "<dt>角色</dt><dd>" + roleBadge(u.role) + "</dd>" +
+        "<dt>状态</dt><dd>" + statusBadge(u.status) + "</dd>" +
+        "<dt>手机号</dt><dd>" + UI.esc(u.phone) + "</dd>" +
+        "<dt>邮箱</dt><dd>" + (u.email ? UI.esc(u.email) : '<span class="muted">未填写</span>') + "</dd>" +
+        "<dt>创建时间</dt><dd>" + UI.esc(u.createdAt || "—") + "</dd>" +
+        "<dt>最后登录</dt><dd>" + UI.esc(u.lastLogin || "—") + "</dd>" +
+      "</dl>" +
+      '<div class="divider"></div>' +
+      "<h4>最近操作</h4>";
+    if (logs.length) {
+      html += logs.slice(0, 5).map(function (l) {
+        return '<div class="list-row mb-8"><div style="flex:1">' +
+          '<div style="font-size:13px">' + UI.esc(l.action) + " · " + UI.esc(l.target) + "</div>" +
+          '<div class="muted" style="font-size:12px">' + UI.esc(l.time) + " · " + UI.esc(l.ip) + "</div>" +
+          "</div></div>";
+      }).join("");
+    } else {
+      html += '<div class="empty-state" style="padding:24px"><div class="empty-title">暂无操作记录</div></div>';
+    }
+    UI.$("#detail-body").innerHTML = html;
+    UI.openModal("detail-modal");
+  }
+
+  /* ---------- 事件 ---------- */
+  UI.$("#f-kw").addEventListener("input", UI.debounce(function () {
+    filters.kw = UI.$("#f-kw").value;
+    page = 1;
+    render();
+  }, 250));
+  UI.$("#f-role").addEventListener("change", function () {
+    filters.role = this.value;
+    page = 1;
+    render();
+  });
+  UI.$("#f-status").addEventListener("change", function () {
+    filters.status = this.value;
+    page = 1;
+    render();
+  });
+  UI.$("#check-all").addEventListener("change", function () {
+    var rows = filtered().slice((page - 1) * pageSize, page * pageSize);
+    rows.forEach(function (u) {
+      if (this.checked) selected[u.id] = true;
+      else delete selected[u.id];
+    }, this);
+    render();
+  });
+  UI.$("#user-tbody").addEventListener("change", function (e) {
+    var cb = e.target.closest("input[data-check]");
+    if (!cb) return;
+    if (cb.checked) selected[cb.dataset.check] = true;
+    else delete selected[cb.dataset.check];
+    render();
+  });
+  UI.$("#user-tbody").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    rowAct(btn.dataset.act, btn.closest("tr").dataset.id);
+  });
+  UI.$("#batch-bar").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-batch]");
+    if (btn) batchAct(btn.dataset.batch);
+  });
+  UI.$("#btn-add").addEventListener("click", function () { openForm("create"); });
+  UI.$("#btn-save-user").addEventListener("click", saveUser);
+
+  render();
+})();
+</script>
+</body>
+</html>

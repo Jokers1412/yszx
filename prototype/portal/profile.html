@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>个人中心 - 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+</head>
+<body data-page="profile">
+<header id="site-header"></header>
+
+<div class="container" style="padding:24px 24px 64px">
+  <h2 style="margin-bottom:18px">个人中心</h2>
+
+  <div class="profile-grid">
+    <!-- 左：用户卡片 -->
+    <div class="card profile-user-card">
+      <div class="avatar lg" id="user-avatar">林</div>
+      <h3 class="mt-8" id="user-name" style="margin-bottom:4px">林小雨</h3>
+      <div><span class="badge badge-blue" id="user-role">学员</span></div>
+      <div class="pu-stats">
+        <div><div class="num" id="stat-practice">0</div><div class="label">做题数</div></div>
+        <div><div class="num" id="stat-interview">0</div><div class="label">面试数</div></div>
+        <div><div class="num" id="stat-wrong">0</div><div class="label">错题数</div></div>
+      </div>
+      <div class="divider"></div>
+      <div class="text-2" style="font-size:13px;text-align:left">
+        <div class="flex-between" style="padding:4px 0"><span class="muted">连续学习</span><b id="stat-streak">0 天</b></div>
+        <div class="flex-between" style="padding:4px 0"><span class="muted">注册时间</span><b>2026-08-12</b></div>
+      </div>
+    </div>
+
+    <!-- 右：基本信息 + 学习数据 -->
+    <div>
+      <div class="card mb-16">
+        <div class="card-header"><h3>基本信息</h3></div>
+        <div class="card-body">
+          <div class="field">
+            <label class="field-label">头像</label>
+            <div class="upload-box" id="avatar-box" title="支持 JPG、PNG，建议 200×200">
+              <div id="avatar-preview" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:32px;color:var(--ink-3)">📷</div>
+            </div>
+            <input type="file" id="avatar-input" accept="image/png,image/jpeg" hidden>
+            <div><button class="btn btn-sm" id="avatar-upload-btn">上传头像</button>
+            <span class="field-hint" style="margin-left:8px">支持 JPG、PNG，建议尺寸 200×200</span></div>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label class="field-label">用户名<span class="req">*</span></label>
+              <input class="input" id="f-name" maxlength="20">
+              <div class="field-error" id="err-name"></div>
+            </div>
+            <div class="field">
+              <label class="field-label">手机号</label>
+              <input class="input" id="f-phone" readonly style="background:var(--surface-2);color:var(--ink-3)">
+              <div class="field-hint">手机号仅脱敏展示，不支持修改</div>
+            </div>
+            <div class="field">
+              <label class="field-label">邮箱</label>
+              <input class="input" id="f-email" type="email" placeholder="选填">
+              <div class="field-error" id="err-email"></div>
+            </div>
+            <div class="field">
+              <label class="field-label">性别</label>
+              <select class="select" id="f-gender">
+                <option value="男">男</option>
+                <option value="女">女</option>
+                <option value="保密" selected>保密</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex" style="gap:10px">
+            <button class="btn btn-primary" id="save-btn">保存修改</button>
+            <button class="btn btn-ghost" id="reset-btn">还原</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>学习数据</h3><a class="btn-link" href="wrongbook.html">我的错题 ›</a></div>
+        <div class="card-body">
+          <div class="detail-stats" style="display:flex;gap:12px">
+            <div class="ds-item" style="flex:1;text-align:center;padding:16px;background:var(--surface-2);border-radius:var(--radius-sm)">
+              <div class="num" id="learn-done" style="font-size:22px;font-weight:700">0</div>
+              <div class="label muted" style="font-size:12px">已完成题目</div>
+            </div>
+            <div class="ds-item" style="flex:1;text-align:center;padding:16px;background:var(--surface-2);border-radius:var(--radius-sm)">
+              <div class="num" id="learn-accuracy" style="font-size:22px;font-weight:700">0%</div>
+              <div class="label muted" style="font-size:12px">正确率</div>
+            </div>
+            <div class="ds-item" style="flex:1;text-align:center;padding:16px;background:var(--surface-2);border-radius:var(--radius-sm)">
+              <div class="num" id="learn-interviews" style="font-size:22px;font-weight:700">0</div>
+              <div class="label muted" style="font-size:12px">AI面试次数</div>
+            </div>
+          </div>
+          <div class="flex gap-8 mt-16">
+            <a class="btn btn-sm" href="practice.html">继续刷题</a>
+            <a class="btn btn-sm" href="interview-config.html">开始 AI 面试</a>
+            <a class="btn btn-sm" href="routes.html">学习路线</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer id="site-footer"></footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+  YS.auth.ensureDemo();
+  if (!YS.auth.requireLogin()) return;
+
+  var user = YS.auth.getUser() || DB.user;
+
+  /* ---------- 渲染 ---------- */
+  function maskPhone(p) {
+    return p && p.length >= 11 ? p.slice(0, 3) + "****" + p.slice(7) : p;
+  }
+  function render() {
+    document.getElementById("user-avatar").textContent = (user.name || "用").slice(0, 1);
+    document.getElementById("user-name").textContent = user.name;
+    document.getElementById("user-role").textContent = user.role || "学员";
+
+    UI.animateNumber(document.getElementById("stat-practice"), DB.learnStats.totalPracticed, { duration: 900 });
+    UI.animateNumber(document.getElementById("stat-interview"), DB.interviewRecords.length, { duration: 900 });
+    UI.animateNumber(document.getElementById("stat-wrong"), DB.wrongList.length, { duration: 900 });
+    document.getElementById("stat-streak").textContent = DB.learnStats.streak + " 天";
+
+    document.getElementById("f-name").value = user.name;
+    document.getElementById("f-phone").value = maskPhone(user.phone);
+    document.getElementById("f-email").value = user.email || "";
+    document.getElementById("f-gender").value = user.gender || "保密";
+
+    UI.animateNumber(document.getElementById("learn-done"), DB.learnStats.totalPracticed, { duration: 900 });
+    UI.animateNumber(document.getElementById("learn-accuracy"), DB.learnStats.accuracy, { suffix: "%", duration: 900 });
+    UI.animateNumber(document.getElementById("learn-interviews"), DB.interviewRecords.length, { duration: 900 });
+  }
+  render();
+
+  /* ---------- 头像上传 ---------- */
+  var avatarInput = document.getElementById("avatar-input");
+  document.getElementById("avatar-box").addEventListener("click", function () { avatarInput.click(); });
+  document.getElementById("avatar-upload-btn").addEventListener("click", function () { avatarInput.click(); });
+  avatarInput.addEventListener("change", function () {
+    var file = this.files && this.files[0];
+    if (!file) return;
+    if (!/image\/(png|jpeg)/.test(file.type)) {
+      UI.toast("头像仅支持 JPG、PNG 格式", "error");
+      this.value = "";
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var box = document.getElementById("avatar-preview");
+      box.innerHTML = "";
+      var img = document.createElement("img");
+      img.src = e.target.result;
+      img.style.cssText = "width:100%;height:100%;object-fit:cover;border-radius:50%";
+      box.appendChild(img);
+      var av = document.getElementById("user-avatar");
+      av.innerHTML = "";
+      var img2 = document.createElement("img");
+      img2.src = e.target.result;
+      img2.style.cssText = "width:100%;height:100%;object-fit:cover;border-radius:50%";
+      av.appendChild(img2);
+      UI.toast("头像已更新，记得点击「保存修改」");
+    };
+    reader.readAsDataURL(file);
+  });
+
+  /* ---------- 保存 / 还原 ---------- */
+  document.getElementById("save-btn").addEventListener("click", function () {
+    var nameEl = document.getElementById("f-name");
+    var emailEl = document.getElementById("f-email");
+    var errName = document.getElementById("err-name");
+    var errEmail = document.getElementById("err-email");
+    errName.textContent = "";
+    errEmail.textContent = "";
+    nameEl.classList.remove("error");
+    emailEl.classList.remove("error");
+
+    var name = nameEl.value.trim();
+    if (!name) {
+      nameEl.classList.add("error");
+      errName.textContent = "用户名不能为空";
+      nameEl.focus();
+      return;
+    }
+    var email = emailEl.value.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      emailEl.classList.add("error");
+      errEmail.textContent = "邮箱格式不正确";
+      emailEl.focus();
+      return;
+    }
+    user.name = name;
+    user.email = email;
+    user.gender = document.getElementById("f-gender").value;
+    YS.auth.login(user); /* 写回登录态 */
+    UI.toast("保存成功");
+    render();
+    YS.renderHeader(); /* 顶栏昵称同步 */
+  });
+
+  document.getElementById("reset-btn").addEventListener("click", function () {
+    UI.confirm({ title: "还原修改", text: "将表单恢复为上次保存的内容，确定吗？" }).then(function (ok) {
+      if (ok) {
+        render();
+        UI.toast("已还原", "warn");
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

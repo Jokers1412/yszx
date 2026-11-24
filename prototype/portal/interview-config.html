@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面试配置 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  .cfg-quota { display: flex; align-items: center; gap: 14px; }
+  .cfg-quota .stat-icon { background: var(--brand-light); }
+  .cfg-quota .q-num { font-size: 26px; font-weight: 700; color: var(--brand); }
+  .cfg-quota .q-num.warn { color: var(--danger); }
+  .start-wrap { display: inline-flex; }
+</style>
+</head>
+<body data-page="interview-config">
+<header id="site-header"></header>
+<div class="container" style="padding:24px 24px 64px">
+
+  <div class="flex-between mb-16" style="flex-wrap:wrap;gap:12px">
+    <div>
+      <h1 style="margin-bottom:4px">AI 模拟面试</h1>
+      <div class="muted">选择技术方向与面试难度，开始一场沉浸式 AI 模拟面试</div>
+    </div>
+    <a class="btn btn-ghost" href="interview-records.html">🎙️ 面试记录</a>
+  </div>
+
+  <div class="card mb-16">
+    <div class="card-header"><h3>技术方向</h3><span class="muted">单选 · 共 8 个方向</span></div>
+    <div class="card-body"><div class="iv-config-grid" id="dir-grid"></div></div>
+  </div>
+
+  <div class="card mb-16">
+    <div class="card-header"><h3>面试难度</h3><span class="muted">单选</span></div>
+    <div class="card-body"><div class="iv-config-grid" id="diff-grid"></div></div>
+  </div>
+
+  <div class="card mb-16">
+    <div class="card-header"><h3>面试设置</h3></div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label" for="count-sel">面试题目数量</label>
+          <select class="select" id="count-sel">
+            <option value="3">3 题</option>
+            <option value="5">5 题</option>
+            <option value="8">8 题</option>
+            <option value="10" selected>10 题（默认）</option>
+            <option value="15">15 题</option>
+          </select>
+          <div class="field-hint">可选 3 / 5 / 8 / 10 / 15 题</div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="timeout-input">回答超时时间</label>
+          <input class="input" id="timeout-input" value="5 分钟" disabled>
+          <div class="field-hint">固定 5 分钟，不可修改</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-24">
+    <div class="card-body cfg-quota">
+      <div class="stat-icon">🎟️</div>
+      <div>
+        <div class="stat-label">今日剩余 AI 面试次数</div>
+        <div class="q-num" id="quota-num">3/5</div>
+        <div class="stat-sub">每日限额 5 次，次日 0 点重置</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex-center">
+    <div class="start-wrap" id="start-wrap">
+      <button class="btn btn-primary btn-lg" id="start-btn">开始AI面试</button>
+    </div>
+  </div>
+
+</div>
+<footer id="site-footer"></footer>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+  if (!YS.auth.requireLogin()) return;
+
+  var LS_CFG = "yszx_iv_config", LS_USED = "yszx_iv_used";
+  var TOTAL = DB.ivQuota.total;
+
+  /* ---------- 配额（DB.ivQuota 为基数，本地累计当日消耗，便于演示耗尽拦截） ---------- */
+  function today() { return UI.fmtDate(new Date()); }
+  function usedInfo() {
+    var raw = null;
+    try { raw = JSON.parse(localStorage.getItem(LS_USED)); } catch (e) {}
+    if (!raw || raw.date !== today()) raw = { date: today(), used: DB.ivQuota.used };
+    return raw;
+  }
+  function left() { return Math.max(0, TOTAL - usedInfo().used); }
+  function bumpUsed() {
+    var u = usedInfo();
+    u.used += 1;
+    localStorage.setItem(LS_USED, JSON.stringify(u));
+  }
+  function renderQuota() {
+    var n = left();
+    UI.$("#quota-num").textContent = n + "/" + TOTAL;
+    UI.$("#quota-num").className = "q-num" + (n <= 0 ? " warn" : "");
+    UI.$("#start-btn").disabled = n <= 0;
+  }
+
+  /* ---------- 技术方向 / 难度 单选 ---------- */
+  var curDir = null, curDiff = null;
+  function renderOptions(host, items, onPick, key) {
+    host.innerHTML = items.map(function (it, i) {
+      return '<div class="iv-option" data-i="' + i + '">' +
+        '<div class="iv-name">' + UI.esc(it.name) + '</div>' +
+        '<div class="iv-desc">' + UI.esc(it.desc) + '</div></div>';
+    }).join("");
+    host.addEventListener("click", function (e) {
+      var opt = e.target.closest(".iv-option");
+      if (!opt) return;
+      host.querySelectorAll(".iv-option").forEach(function (o) { o.classList.remove("active"); });
+      opt.classList.add("active");
+      onPick(items[parseInt(opt.dataset.i, 10)]);
+    });
+    /* 默认选中 */
+    var def = 0;
+    items.forEach(function (it, i) { if (it.default) def = i; });
+    host.querySelector('[data-i="' + def + '"]').classList.add("active");
+    onPick(items[def]);
+  }
+  renderOptions(UI.$("#dir-grid"), DB.ivDirections, function (it) { curDir = it; }, "dir");
+  renderOptions(UI.$("#diff-grid"), DB.ivDifficulties, function (it) { curDiff = it; }, "diff");
+
+  /* ---------- 开始面试 ---------- */
+  UI.$("#start-btn").addEventListener("click", function () {
+    if (left() <= 0) {
+      UI.toast("今日剩余面试次数已用完，明日 0 点重置", "warn");
+      return;
+    }
+    var cfg = {
+      direction: curDir.name,
+      difficulty: curDiff.id,
+      difficultyName: curDiff.name,
+      count: parseInt(UI.$("#count-sel").value, 10),
+      timeout: 5
+    };
+    localStorage.setItem(LS_CFG, JSON.stringify(cfg));
+    bumpUsed();
+    UI.toast("已创建面试，正在进入…");
+    setTimeout(function () { location.href = "interview.html"; }, 350);
+  });
+  /* 配额耗尽：按钮 disabled 后点击落到容器上，这里做 toast 拦截 */
+  UI.$("#start-wrap").addEventListener("click", function () {
+    if (left() <= 0) UI.toast("今日剩余面试次数已用完，明日 0 点重置", "warn");
+  });
+
+  renderQuota();
+})();
+</script>
+</body>
+</html>

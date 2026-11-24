@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>首页 - 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  .hero-actions .btn { min-width: 132px; }
+  .ai-intro .btn-white { background: #fff; color: var(--brand-dark); border-color: #fff; }
+  .ai-intro .btn-white:hover { background: var(--brand-light); color: var(--brand-dark); }
+  .onboard-step { text-align: center; padding: 6px 10px 2px; }
+  .onboard-step .ob-icon { font-size: 44px; line-height: 1.2; }
+  .onboard-step h4 { margin: 12px 0 6px; font-size: 17px; }
+  .onboard-step p { color: var(--ink-3); margin: 0; }
+  .onboard-dots .dot { cursor: pointer; }
+  .onboard-nav { display: flex; justify-content: center; margin-top: 10px; }
+</style>
+</head>
+<body data-page="home">
+<header id="site-header"></header>
+
+<!-- ============ Hero 首屏 ============ -->
+<section class="hero">
+  <div class="container">
+    <h1>云枢智学 · AI 赋能的智能面试训练平台</h1>
+    <p class="hero-sub">海量题库 × AI 模拟面试 × 学习路线，从刷题、错题到模拟面试与能力报告，一站式备战技术面试。</p>
+    <div class="hero-actions">
+      <a class="btn btn-lg btn-white" href="questions.html">海量题库</a>
+      <a class="btn btn-lg btn-outline-white" href="interview-config.html">开始AI面试</a>
+    </div>
+    <div class="hero-stats" id="hero-stats"></div>
+  </div>
+</section>
+
+<!-- ============ 快速开始 ============ -->
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <h2>快速开始</h2>
+      <span class="sub">选一个入口，马上开始训练</span>
+    </div>
+    <div class="quick-grid">
+      <a class="quick-card" href="routes.html">
+        <div class="q-icon">🗺️</div>
+        <h3>规划学习路线</h3>
+        <p>按学习路线系统化进阶</p>
+      </a>
+      <a class="quick-card" href="practice.html?mode=random">
+        <div class="q-icon">🎲</div>
+        <h3>随机练习10题</h3>
+        <p>随机抽取 10 道题，快速热身</p>
+      </a>
+      <a class="quick-card" href="practice.html">
+        <div class="q-icon">📖</div>
+        <h3>继续上次学习</h3>
+        <p>接着上次的练习进度继续刷题</p>
+      </a>
+      <a class="quick-card" href="interview-config.html">
+        <div class="q-icon">🎙️</div>
+        <h3>开始AI面试</h3>
+        <p>AI 面试官实时点评你的回答</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 核心功能 ============ -->
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <h2>核心功能</h2>
+      <span class="sub">刷题 → 错题 → AI 面试 → 报告 → 补强</span>
+    </div>
+    <div class="feature-grid">
+      <a class="card feature-card" href="routes.html">
+        <div class="f-icon">🗺️</div>
+        <h3>学习路线</h3>
+        <p>精选 B 站课程串成路线，按序学习</p>
+      </a>
+      <a class="card feature-card" href="questions.html">
+        <div class="f-icon">📚</div>
+        <h3>海量题库</h3>
+        <p>8 大技术方向、按阶段进阶的精选面试题</p>
+      </a>
+      <a class="card feature-card" href="practice.html">
+        <div class="f-icon">✍️</div>
+        <h3>刷题练习</h3>
+        <p>顺序 / 随机练习，错题自动收录</p>
+      </a>
+      <a class="card feature-card" href="interview-config.html">
+        <div class="f-icon">🤖</div>
+        <h3>AI模拟面试</h3>
+        <p>还原真实面试场景，逐题实时评分</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 学习统计 ============ -->
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <h2>学习统计</h2>
+      <a href="profile.html">查看全部</a>
+    </div>
+    <div class="home-stats-grid" id="learn-stats"></div>
+  </div>
+</section>
+
+<!-- ============ 近 7 天练习 ============ -->
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <h2>近 7 天练习</h2>
+      <span class="sub">每日刷题量</span>
+    </div>
+    <div class="card">
+      <div class="card-body week-chart-wrap">
+        <div class="bar-chart" id="week-chart"></div>
+        <div class="week-today-box">
+          <div class="muted">今日已刷</div>
+          <div class="big" id="today-done"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 热门学科 ============ -->
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <h2>热门学科</h2>
+      <span class="sub">按阶段进阶刷题，点击进入题库</span>
+    </div>
+    <div class="stage-grid" id="stage-grid"></div>
+  </div>
+</section>
+
+<!-- ============ AI 面试介绍 ============ -->
+<section class="section">
+  <div class="container">
+    <div class="ai-intro">
+      <div>
+        <h2>AI 模拟面试 · 你的私人面试官</h2>
+        <ul class="sell-list">
+          <li><span>✓</span>智能出题</li>
+          <li><span>✓</span>实时评分</li>
+          <li><span>✓</span>面试报告</li>
+          <li><span>✓</span>海量知识</li>
+        </ul>
+        <a class="btn btn-lg btn-white" href="interview-config.html">立即体验</a>
+      </div>
+      <div class="demo-chat">
+        <div class="demo-bubble ai">你好，我是 AI 面试官。请先做一个简短的自我介绍吧。</div>
+        <div class="demo-bubble me">面试官您好，我叫林小雨，有两年后端开发经验，最近在做大模型应用方向。</div>
+        <div class="demo-bubble ai">很好。请解释一下什么是 RAG？它在企业知识库场景中如何落地？</div>
+        <div class="demo-bubble me">RAG 会先检索企业知识库，把相关片段注入提示词，再让大模型生成有依据的回答。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 新手引导 ============ -->
+<div class="modal-overlay" id="onboard-modal" hidden data-static="true" data-onclose="ysOnboardDismiss">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>新手引导</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="onboard-step" data-o="1">
+        <div class="ob-icon">🎯</div>
+        <h4>① 选择技术方向</h4>
+        <p>从 8 大 AI 技术方向中选定目标岗位，题库与面试都围绕它展开。</p>
+      </div>
+      <div class="onboard-step" data-o="2" hidden>
+        <div class="ob-icon">✍️</div>
+        <h4>② 开始刷题练习</h4>
+        <p>海量题库按阶段进阶，支持顺序 / 随机练习，错题自动收录方便复盘。</p>
+      </div>
+      <div class="onboard-step" data-o="3" hidden>
+        <div class="ob-icon">🎙️</div>
+        <h4>③ AI面试检验</h4>
+        <p>AI 面试官模拟真实面试并实时评分，面试报告帮你定位薄弱点。</p>
+      </div>
+      <div class="onboard-dots" id="onboard-dots">
+        <span class="dot active" data-i="1"></span>
+        <span class="dot" data-i="2"></span>
+        <span class="dot" data-i="3"></span>
+      </div>
+      <div class="onboard-nav">
+        <button class="btn btn-ghost btn-sm" id="onboard-next">下一步</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>跳过引导</button>
+      <button class="btn btn-primary" id="onboard-start">开始学习</button>
+    </div>
+  </div>
+</div>
+
+<footer id="site-footer"></footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- Hero 平台数据（递增动画） ---------- */
+  var heroHtml = DB.heroStats.map(function (s, i) {
+    return '<div class="hero-stat"><div class="num" data-hs="' + i + '">0' + UI.esc(s.suffix) + '</div><div class="label">' + UI.esc(s.label) + '</div></div>';
+  }).join("");
+  document.getElementById("hero-stats").innerHTML = heroHtml;
+  DB.heroStats.forEach(function (s, i) {
+    UI.animateNumber(document.querySelector('.hero-stat .num[data-hs="' + i + '"]'), s.num, { suffix: s.suffix });
+  });
+
+  /* ---------- 学习统计 ---------- */
+  var ls = DB.learnStats;
+  var statData = [
+    { label: "连续学习天数", value: ls.streak, unit: " 天", sub: "坚持每日打卡" },
+    { label: "正确率", value: ls.accuracy, unit: "%", sub: "全部练习累计" },
+    { label: "总练习数", value: ls.totalPracticed, unit: " 题", sub: "累计刷题量" }
+  ];
+  document.getElementById("learn-stats").innerHTML = statData.map(function (s) {
+    return '<div class="card stat-card">' +
+      '<div class="stat-label">' + s.label + "</div>" +
+      '<div class="stat-value">' + s.value + s.unit + "</div>" +
+      '<div class="stat-sub">' + s.sub + "</div></div>";
+  }).join("");
+
+  /* ---------- 近 7 天练习柱状图 ---------- */
+  var week = DB.weekPractice;
+  var max = Math.max.apply(null, week.map(function (w) { return w.n; })) || 1;
+  document.getElementById("week-chart").innerHTML = week.map(function (w, i) {
+    var h = Math.round(w.n / max * 140);
+    var today = i === week.length - 1 ? " today" : "";
+    return '<div class="bar-col' + today + '">' +
+      '<div class="bar" style="height:' + h + 'px" data-tip="<b>' + w.n + ' 题</b>"></div>' +
+      '<div class="bar-label">' + UI.esc(w.day) + "</div></div>";
+  }).join("");
+  document.getElementById("today-done").textContent = ls.todayDone + " 题";
+
+  /* ---------- 热门阶段（前 8 个有题目的阶段） ---------- */
+  var stageList = [];
+  DB.subjects.forEach(function (sub) {
+    sub.stages.forEach(function (st) {
+      if (st.count > 0 && stageList.length < 8) stageList.push({ st: st, sub: sub });
+    });
+  });
+  document.getElementById("stage-grid").innerHTML = stageList.map(function (it) {
+    return '<a class="card stage-card" href="questions.html?stage=' + encodeURIComponent(it.st.id) + '">' +
+      '<div class="st-icon">' + it.st.icon + "</div>" +
+      "<h3>" + UI.esc(it.st.name) + "</h3>" +
+      '<div class="st-sub">' + UI.esc(it.sub.name) + "</div>" +
+      '<div class="st-sub">' + it.st.count + " 道题目</div></a>";
+  }).join("");
+
+  /* ---------- 新手引导 ---------- */
+  window.ysOnboardDismiss = function () {
+    localStorage.setItem("yszx_onboarded", "1");
+  };
+  var oSteps = UI.$$(".onboard-step");
+  var oDots = UI.$$("#onboard-dots .dot");
+  var oCur = 1;
+  function showOnboard(i) {
+    oCur = i;
+    oSteps.forEach(function (el) { el.hidden = Number(el.dataset.o) !== i; });
+    oDots.forEach(function (d) { d.classList.toggle("active", Number(d.dataset.i) === i); });
+    var nextBtn = document.getElementById("onboard-next");
+    if (nextBtn) nextBtn.textContent = i >= oSteps.length ? "重新看一遍" : "下一步";
+  }
+  oDots.forEach(function (d) {
+    d.addEventListener("click", function () { showOnboard(Number(d.dataset.i)); });
+  });
+  var nextBtn = document.getElementById("onboard-next");
+  if (nextBtn) {
+    nextBtn.addEventListener("click", function () {
+      showOnboard(oCur >= oSteps.length ? 1 : oCur + 1);
+    });
+  }
+  document.getElementById("onboard-start").addEventListener("click", function () {
+    localStorage.setItem("yszx_onboarded", "1");
+    UI.closeModal("onboard-modal");
+    location.href = "questions.html";
+  });
+  if (!localStorage.getItem("yszx_onboarded")) {
+    UI.openModal("onboard-modal");
+    showOnboard(1);
+  }
+})();
+</script>
+</body>
+</html>

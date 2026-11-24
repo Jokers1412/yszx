@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学员管理 - 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  #batch-bar { margin-bottom: 12px; }
+  .stu-name { display: inline-flex; align-items: center; gap: 8px; }
+</style>
+</head>
+<body class="admin-body" data-page="students">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <div class="filter-bar">
+        <input class="input search-input" id="f-kw" type="text" placeholder="搜索昵称 / 手机号">
+        <select class="select" id="f-status">
+          <option value="all">全部状态</option>
+          <option value="enabled">已启用</option>
+          <option value="disabled">已禁用</option>
+        </select>
+      </div>
+
+      <div class="alert alert-info">口径说明：管理端展示完整手机号（不做脱敏）；「学习天数」为累计有作答的去重天数（按 Asia/Shanghai 日界）；「正确率」为答对数 ÷ 作答总数（无作答记 0）。</div>
+
+      <div class="toolbar-row">
+        <div class="toolbar-right">
+          <button class="btn" id="btn-export">导出</button>
+        </div>
+      </div>
+
+      <div class="batch-bar hidden" id="batch-bar">
+        <span class="batch-count" id="batch-count">已选择 0 项</span>
+        <button class="btn btn-sm" data-batch="enable">批量启用</button>
+        <button class="btn btn-sm" data-batch="disable">批量禁用</button>
+        <button class="btn btn-sm btn-soft-danger" data-batch="delete">批量删除</button>
+        <button class="btn btn-sm btn-ghost" data-batch="cancel">取消选择</button>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table class="table" id="stu-table">
+            <thead>
+              <tr>
+                <th class="col-check"><input type="checkbox" id="check-all"></th>
+                <th>学员</th>
+                <th title="完整手机号，不做脱敏">手机号</th>
+                <th>注册时间</th>
+                <th>学习天数</th>
+                <th>刷题·面试</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="stu-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pager"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<div class="modal-overlay" id="detail-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>学员详情</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body" id="detail-body"></div>
+    <div class="modal-footer">
+      <button class="btn" data-close>关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 数据：从 DB 拷贝到内存操作 ---------- */
+  function cloneArr(arr) {
+    return arr.map(function (o) { var c = {}; for (var k in o) c[k] = o[k]; return c; });
+  }
+  var list = cloneArr(DB.students);
+  var filters = { kw: "", status: "all" };
+  var page = 1, pageSize = 5;
+  var selected = {};           // id -> true，跨页保留勾选
+  var detailId = null, detailPage = 1;
+
+  /* ---------- 工具 ---------- */
+  function statusBadge(st) {
+    return st === "enabled"
+      ? '<span class="badge badge-green">已启用</span>'
+      : '<span class="badge badge-red">已禁用</span>';
+  }
+  function find(id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+  function filtered() {
+    var kw = filters.kw.trim().toLowerCase();
+    return list.filter(function (s) {
+      if (filters.status !== "all" && s.status !== filters.status) return false;
+      if (kw && s.name.toLowerCase().indexOf(kw) < 0 && s.phone.indexOf(kw) < 0) return false;
+      return true;
+    });
+  }
+  function selIds() {
+    return Object.keys(selected).filter(function (id) { return selected[id]; });
+  }
+
+  /* 该学员的面试记录（按 DB.interviewRecords 生成） */
+  function recordsOf(s) {
+    var all = DB.interviewRecords, n = s.interviews || 0, out = [];
+    var start = (parseInt(String(s.id).replace(/\D/g, ""), 10) || 0) % all.length;
+    for (var i = 0; i < n; i++) {
+      var r = all[(start + i) % all.length];
+      out.push({
+        datetime: r.datetime, direction: r.direction,
+        difficulty: DB.diffLabel[r.difficulty] || r.difficulty,
+        count: r.count, score: r.score
+      });
+    }
+    return out;
+  }
+
+  /* ---------- 列表渲染 ---------- */
+  function render() {
+    var rows = filtered();
+    var total = rows.length;
+    var pages = Math.max(1, Math.ceil(total / pageSize));
+    if (page > pages) page = pages;
+    var slice = rows.slice((page - 1) * pageSize, page * pageSize);
+
+    var html = slice.map(function (s) {
+      return '<tr data-id="' + s.id + '">' +
+        '<td class="col-check"><input type="checkbox" data-check="' + s.id + '"' + (selected[s.id] ? " checked" : "") + "></td>" +
+        '<td><span class="stu-name"><span class="avatar sm">' + UI.esc(s.name.slice(0, 1)) + "</span>" + UI.esc(s.name) + "</span></td>" +
+        "<td>" + UI.esc(s.phone) + "</td>" +
+        '<td class="nowrap">' + UI.esc(s.regTime) + "</td>" +
+        "<td>" + s.studyDays + "</td>" +
+        "<td>" + s.practice + " · " + s.interviews + "</td>" +
+        "<td>" + statusBadge(s.status) + "</td>" +
+        '<td class="cell-actions">' +
+          '<button class="btn-link" data-act="detail">详情</button>' +
+          (s.status === "enabled"
+            ? '<button class="btn-link danger" data-act="disable">禁用</button>'
+            : '<button class="btn-link" data-act="enable">启用</button>') +
+          '<button class="btn-link danger" data-act="delete">删除</button>' +
+        "</td></tr>";
+    }).join("");
+
+    if (!slice.length) {
+      html = '<tr><td colspan="8"><div class="empty-state">' +
+        '<div class="empty-icon">🔍</div>' +
+        '<div class="empty-title">没有找到匹配的学员</div>' +
+        "</div></td></tr>";
+    }
+    UI.$("#stu-tbody").innerHTML = html;
+
+    /* 表头全选：仅当前页 */
+    var ids = slice.map(function (s) { return s.id; });
+    var all = ids.length > 0 && ids.every(function (id) { return selected[id]; });
+    var some = ids.some(function (id) { return selected[id]; });
+    var ca = UI.$("#check-all");
+    ca.checked = all;
+    ca.indeterminate = !all && some;
+
+    /* 批量条 */
+    var cnt = selIds().length;
+    UI.$("#batch-bar").classList.toggle("hidden", cnt === 0);
+    UI.$("#batch-count").textContent = "已选择 " + cnt + " 项";
+
+    UI.pager(UI.$("#pager"), {
+      total: total, page: page, pageSize: pageSize,
+      onChange: function (p) { page = p; render(); }
+    });
+  }
+
+  /* ---------- 行 / 批量操作（均二次确认） ---------- */
+  function setStatus(id, st, msg) {
+    var s = find(id);
+    if (!s) return;
+    s.status = st;
+    UI.toast(msg);
+    render();
+  }
+  function rowAct(act, id) {
+    var s = find(id);
+    if (!s) return;
+    if (act === "detail") { openDetail(id); return; }
+    if (act === "enable") {
+      UI.confirm({ title: "启用学员", text: "确定要启用学员「" + s.name + "」吗？", okText: "启用" })
+        .then(function (ok) { if (ok) setStatus(id, "enabled", "已启用"); });
+    } else if (act === "disable") {
+      UI.confirm({ title: "禁用学员", text: "确定要禁用学员「" + s.name + "」吗？", okText: "禁用" })
+        .then(function (ok) { if (ok) setStatus(id, "disabled", "已禁用"); });
+    } else if (act === "delete") {
+      UI.confirm({ title: "删除学员", text: "确定要删除学员「" + s.name + "」吗？", okText: "删除", danger: true })
+        .then(function (ok) {
+          if (!ok) return;
+          list = list.filter(function (x) { return x.id !== id; });
+          delete selected[id];
+          UI.toast("已删除");
+          render();
+        });
+    }
+  }
+  function batchAct(act) {
+    var ids = selIds();
+    if (act === "cancel") {
+      selected = {};
+      render();
+      return;
+    }
+    if (!ids.length) { UI.toast("请先勾选学员", "warn"); return; }
+    var n = ids.length;
+    if (act === "enable" || act === "disable") {
+      var st = act === "enable" ? "enabled" : "disabled";
+      var label = act === "enable" ? "启用" : "禁用";
+      UI.confirm({ title: "批量" + label, text: "确定要" + label + "选中的 " + n + " 名学员吗？", okText: "批量" + label })
+        .then(function (ok) {
+          if (!ok) return;
+          ids.forEach(function (id) { var s = find(id); if (s) s.status = st; });
+          selected = {};
+          UI.toast("已批量" + label + " " + n + " 项");
+          render();
+        });
+    } else if (act === "delete") {
+      UI.confirm({ title: "批量删除", text: "确定要删除选中的 " + n + " 名学员吗？", okText: "批量删除", danger: true })
+        .then(function (ok) {
+          if (!ok) return;
+          list = list.filter(function (s) { return !selected[s.id]; });
+          selected = {};
+          UI.toast("已批量删除 " + n + " 项");
+          render();
+        });
+    }
+  }
+
+  /* ---------- 学员详情弹窗 ---------- */
+  function dsItem(num, label) {
+    return '<div class="ds-item"><div class="num">' + UI.esc(String(num)) + '</div><div class="label">' + UI.esc(label) + "</div></div>";
+  }
+  function renderDetailRecs(recs) {
+    var host = UI.$("#detail-recs");
+    if (!host) return;
+    var pages = Math.max(1, Math.ceil(recs.length / 3));
+    if (detailPage > pages) detailPage = pages;
+    var slice = recs.slice((detailPage - 1) * 3, detailPage * 3);
+    var html;
+    if (!recs.length) {
+      html = '<div class="empty-state" style="padding:24px"><div class="empty-title">暂无面试记录</div></div>';
+    } else {
+      html = '<div class="table-wrap"><table class="table"><thead><tr>' +
+        "<th>面试时间</th><th>学科</th><th>难度</th><th>题数</th><th>综合评分</th>" +
+        "</tr></thead><tbody>" +
+        slice.map(function (r) {
+          return "<tr><td>" + UI.esc(r.datetime) + "</td><td>" + UI.esc(r.direction) + "</td><td>" +
+            UI.esc(r.difficulty) + "</td><td>" + r.count + "</td><td>" + r.score + "</td></tr>";
+        }).join("") +
+        "</tbody></table></div>";
+    }
+    host.innerHTML = html;
+    UI.pager(UI.$("#detail-pager"), {
+      total: recs.length, page: detailPage, pageSize: 3,
+      onChange: function (p) { detailPage = p; renderDetailRecs(recs); }
+    });
+  }
+  function openDetail(id) {
+    var s = find(id);
+    if (!s) return;
+    detailId = id;
+    detailPage = 1;
+    var recs = recordsOf(s);
+    var html =
+      '<dl class="desc-list">' +
+        "<dt>头像</dt><dd><span class=\"avatar sm\">" + UI.esc(s.name.slice(0, 1)) + "</span></dd>" +
+        "<dt>昵称</dt><dd>" + UI.esc(s.name) + "</dd>" +
+        "<dt>状态</dt><dd>" + statusBadge(s.status) + "</dd>" +
+        "<dt>手机号</dt><dd>" + UI.esc(s.phone) + "</dd>" +
+        "<dt>邮箱</dt><dd>" + (s.email ? UI.esc(s.email) : '<span class="muted">未填写</span>') + "</dd>" +
+        "<dt>注册时间</dt><dd>" + UI.esc(s.regTime) + "</dd>" +
+        "<dt>最后登录</dt><dd>" + UI.esc(s.lastLogin) + "</dd>" +
+      "</dl>" +
+      '<div class="divider"></div>' +
+      "<h4>学习统计</h4>" +
+      '<div class="detail-stats">' +
+        dsItem(s.studyDays, "学习天数") +
+        dsItem(s.courses, "已学课程") +
+        dsItem(s.practice, "刷题总数") +
+        dsItem(s.accuracy + "%", "正确率") +
+      "</div>" +
+      '<div class="divider"></div>' +
+      "<h4>面试记录</h4>" +
+      '<p class="text-2 mb-8">累计面试次数：' + (s.interviews || 0) + "</p>" +
+      '<div id="detail-recs"></div>' +
+      '<div class="pagination" id="detail-pager"></div>';
+    UI.$("#detail-body").innerHTML = html;
+    renderDetailRecs(recs);
+    UI.openModal("detail-modal");
+  }
+
+  /* ---------- 事件 ---------- */
+  UI.$("#f-kw").addEventListener("input", UI.debounce(function () {
+    filters.kw = UI.$("#f-kw").value;
+    page = 1;
+    render();
+  }, 250));
+  UI.$("#f-status").addEventListener("change", function () {
+    filters.status = this.value;
+    page = 1;
+    render();
+  });
+  UI.$("#check-all").addEventListener("change", function () {
+    var rows = filtered().slice((page - 1) * pageSize, page * pageSize);
+    rows.forEach(function (s) {
+      if (this.checked) selected[s.id] = true;
+      else delete selected[s.id];
+    }, this);
+    render();
+  });
+  UI.$("#stu-tbody").addEventListener("change", function (e) {
+    var cb = e.target.closest("input[data-check]");
+    if (!cb) return;
+    if (cb.checked) selected[cb.dataset.check] = true;
+    else delete selected[cb.dataset.check];
+    render();
+  });
+  UI.$("#stu-tbody").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    rowAct(btn.dataset.act, btn.closest("tr").dataset.id);
+  });
+  UI.$("#batch-bar").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-batch]");
+    if (btn) batchAct(btn.dataset.batch);
+  });
+  UI.$("#btn-export").addEventListener("click", function () {
+    UI.toast("已按当前筛选导出学员列表（原型模拟）");
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

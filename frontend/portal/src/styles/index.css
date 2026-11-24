@@ -1,0 +1,25 @@
+@import './tokens.css';
+
+/* 基础排版（对齐 prototype/assets/css/base.css） */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--brand); text-decoration: none; }
+h1, h2, h3, h4, h5 { margin: 0 0 .5em; line-height: 1.35; color: var(--ink); }
+
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.muted { color: var(--ink-3); }
+
+/* 页面占位（功能开发阶段逐页替换为原型实现） */
+.page-placeholder {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--ink-3);
+}

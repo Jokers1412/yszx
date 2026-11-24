@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>刷题练习 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  /* 刷题练习少量页内补充样式 */
+  .acell.current, .acell.current.done, .acell.current.wrong {
+    background: var(--brand); border-color: var(--brand); color: #fff;
+  }
+  .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .mode-card {
+    padding: 26px 18px; border: 1.5px solid var(--line); border-radius: var(--radius);
+    cursor: pointer; text-align: center; transition: all .15s; user-select: none; background: var(--surface);
+  }
+  .mode-card:hover { border-color: var(--brand); background: var(--brand-light); transform: translateY(-2px); }
+  .mode-card.selected { border-color: var(--brand); background: var(--brand-light); }
+  .mode-card .mc-icon { font-size: 30px; }
+  .mode-card .mc-name { font-weight: 600; font-size: 15px; margin-top: 6px; }
+  .mode-card .mc-desc { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .ai-loading { display: flex; align-items: center; gap: 10px; }
+  .ai-loading .typing-indicator span { background: var(--brand); }
+  .practice-side .side-label { font-size: 12px; color: var(--ink-3); margin-top: 16px; }
+</style>
+</head>
+<body data-page="practice">
+<header id="site-header"></header>
+
+<div class="container" style="padding:24px 24px 64px">
+  <div class="practice-layout">
+    <aside class="card practice-side" id="practice-side"></aside>
+    <section class="card question-panel" id="question-panel"></section>
+  </div>
+</div>
+
+<!-- 练习模式选择弹窗 -->
+<div class="modal-overlay" id="mode-modal" data-static="true" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>练习模式选择</h3>
+      <button class="modal-close" id="mode-cancel">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="muted mb-16">请选择本次练习的出题方式</p>
+      <div class="mode-grid">
+        <div class="mode-card" data-mode="sequential">
+          <div class="mc-icon">📖</div>
+          <div class="mc-name">顺序练习</div>
+          <div class="mc-desc">按题库顺序逐题作答</div>
+        </div>
+        <div class="mode-card" data-mode="random">
+          <div class="mc-icon">🔀</div>
+          <div class="mc-name">随机练习</div>
+          <div class="mc-desc">打乱题目顺序作答</div>
+        </div>
+      </div>
+      <p class="muted mt-16 mb-0" style="font-size:12px">按 Esc 或点击右上角 ✕ 取消，放弃本次练习并返回题库</p>
+    </div>
+  </div>
+</div>
+
+<!-- 续做确认弹窗 -->
+<div class="modal-overlay" id="resume-modal" data-static="true" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>继续练习</h3>
+      <button class="modal-close" id="resume-close">×</button>
+    </div>
+    <div class="modal-body"><p class="mb-0 text-2">检测到未完成的练习，是否继续？</p></div>
+    <div class="modal-footer">
+      <button class="btn" id="resume-restart">重新开始</button>
+      <button class="btn btn-primary" id="resume-continue">继续</button>
+    </div>
+  </div>
+</div>
+
+<!-- 快捷键面板 -->
+<div class="modal-overlay" id="shortcut-modal" hidden>
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>快捷键</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="shortcut-grid">
+        <span><span class="kbd">←</span></span><span>上一题</span>
+        <span><span class="kbd">→</span></span><span>下一题</span>
+        <span><span class="kbd">Enter</span></span><span>提交答案 / 下一题</span>
+        <span><span class="kbd">?</span></span><span>显示快捷键面板</span>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-primary" data-close>知道了</button></div>
+  </div>
+</div>
+
+<footer id="site-footer"></footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* 受限页面：未登录跳登录页（portal.js 的演示账号自动登录在 DOMContentLoaded 才执行，这里先补执行） */
+  YS.auth.ensureDemo();
+  if (!YS.auth.requireLogin()) return;
+
+  var esc = UI.esc;
+  var params = new URLSearchParams(location.search);
+  var qById = {};
+  DB.questions.forEach(function (q) { qById[q.id] = q; });
+
+  function findStage(stageId) {
+    for (var i = 0; i < DB.subjects.length; i++) {
+      var st = DB.subjects[i].stages;
+      for (var j = 0; j < st.length; j++) {
+        if (st[j].id === stageId) return { stage: st[j], subject: DB.subjects[i] };
+      }
+    }
+    return null;
+  }
+
+  /* ---------- 入口参数：出题范围 ---------- */
+  var pool = [], title = "全部题目";
+  var qParam = params.get("q"), stageParam = params.get("stage");
+  if (qParam) {
+    var one = qById[parseInt(qParam, 10)];
+    if (!one) {
+      UI.toast("题目不存在或已下架", "error");
+      setTimeout(function () { location.href = "questions.html"; }, 800);
+      return;
+    }
+    pool = [one];
+    var si1 = findStage(one.stageId);
+    title = si1 ? si1.stage.name : "单题练习";
+  } else if (stageParam) {
+    pool = DB.questions.filter(function (q) { return q.stageId === stageParam; });
+    if (!pool.length) {
+      UI.toast("该阶段暂无题目，题目正在录入中", "warn");
+      setTimeout(function () { location.href = "questions.html"; }, 900);
+      return;
+    }
+    var si2 = findStage(stageParam);
+    title = si2 ? si2.stage.name : "阶段练习";
+  } else {
+    pool = DB.questions.slice();
+  }
+  var preferRandom = params.get("mode") === "random";
+
+  /* ---------- 会话持久化 ---------- */
+  var KEY = "yszx_practice";
+  var st = null;            // 当前练习会话
+  var timerHandle = null;
+
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} }
+  function loadSaved() { try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { return null; } }
+  function clearSaved() { localStorage.removeItem(KEY); }
+
+  function normalize(s) {
+    if (!s || !s.seq || !s.seq.length) return null;
+    s.seq = s.seq.filter(function (id) { return !!qById[id]; });
+    if (!s.seq.length) return null;
+    s.answers = s.answers || {};
+    s.graded = s.graded || {};
+    s.results = s.results || {};
+    s.grading = {};
+    s.elapsed = s.elapsed || 0;
+    s.current = Math.min(Math.max(s.current || 0, 0), s.seq.length - 1);
+    return s;
+  }
+
+  /* ---------- 计时器 ---------- */
+  function startTimer() {
+    stopTimer();
+    timerHandle = setInterval(function () {
+      if (!st) return;
+      st.elapsed += 1;
+      var el = document.getElementById("timer-el");
+      if (el) el.textContent = UI.fmtClock(st.elapsed);
+      save();
+    }, 1000);
+  }
+  function stopTimer() { if (timerHandle) { clearInterval(timerHandle); timerHandle = null; } }
+
+  /* ---------- 会话状态辅助 ---------- */
+  function curQ() { return qById[st.seq[st.current]]; }
+  function isLast() { return st.current >= st.seq.length - 1; }
+  function ansOf(qid) { return st.answers[qid] || ""; }
+  function isGraded(qid) { return !!st.graded[qid]; }
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr;
+  }
+  function answerDisplay(q) {
+    if (q.type === "short") return "见参考答案";
+    if (q.type === "judge") return q.answer === "T" ? "正确" : "错误";
+    return q.answer.split("").join("、");
+  }
+  function fallbackGrade() {
+    return { score: 7, comment: "回答基本涵盖了核心要点，思路清晰；建议结合具体场景补充细节，使答案更加完整。", keyPoints: ["覆盖核心概念", "表述清晰", "可补充实例"] };
+  }
+
+  /* ---------- 渲染：左侧面板 ---------- */
+  function cellClass(idx) {
+    var qid = st.seq[idx];
+    var cls = "acell";
+    if (idx === st.current) cls += " current";
+    if (isGraded(qid)) {
+      var r = st.results[qid];
+      var ok = qById[qid].type === "short" ? (r && r.score >= 6) : r === "correct";
+      cls += ok ? " done" : " wrong";
+    } else if (String(ansOf(qid)).length) {
+      cls += " done";
+    }
+    return cls;
+  }
+
+  function renderSide() {
+    var total = st.seq.length;
+    var pct = Math.round((st.current + 1) / total * 100);
+    var cells = st.seq.map(function (id, i) {
+      return '<div class="' + cellClass(i) + '" data-jump="' + i + '">' + (i + 1) + "</div>";
+    }).join("");
+    var side = document.getElementById("practice-side");
+    side.innerHTML =
+      '<a href="questions.html">‹ 返回题库</a>' +
+      "<h3>" + esc(st.title || title) + "</h3>" +
+      '<div class="progress"><div class="progress-bar' + (pct >= 100 ? " success" : "") + '" style="width:' + pct + '%"></div></div>' +
+      '<div class="flex-between mt-8"><span class="muted">当前 ' + (st.current + 1) + " / " + total + '</span><span class="muted">' + pct + "%</span></div>" +
+      '<div class="side-label">已用时</div>' +
+      '<div class="practice-timer" id="timer-el">' + UI.fmtClock(st.elapsed) + "</div>" +
+      '<div class="side-label">答题卡</div>' +
+      '<div class="answer-card-grid">' + cells + "</div>" +
+      '<button class="btn btn-soft-danger btn-block" id="end-btn">结束练习</button>';
+    side.querySelectorAll("[data-jump]").forEach(function (el) {
+      el.addEventListener("click", function () { goTo(parseInt(el.dataset.jump, 10)); });
+    });
+    document.getElementById("end-btn").addEventListener("click", endPractice);
+  }
+
+  /* ---------- 渲染：答题区 ---------- */
+  function analysisCardHtml(q) {
+    var userAns = ansOf(q.id);
+    var res = st.results[q.id];
+    var label, cls;
+    if (!String(userAns).length) { label = "未作答"; cls = "badge-gray"; }
+    else if (res === "correct") { label = "回答正确"; cls = "badge-green"; }
+    else { label = "回答错误"; cls = "badge-red"; }
+    return '<div class="analysis-card" id="analysis-card">' +
+      '<h4>答案解析 <span class="badge ' + cls + '">' + label + "</span></h4>" +
+      "<p>正确答案：<strong>" + esc(answerDisplay(q)) + "</strong></p>" +
+      '<p class="mb-0">解析：' + esc(q.analysis) + "</p></div>";
+  }
+
+  function gradeCardHtml(q, r) {
+    var pass = r.score >= 6;
+    return '<div class="ai-grade-card" id="analysis-card">' +
+      '<div class="flex-between"><h4 style="margin:0">AI 评分结果</h4>' +
+      '<span class="badge ' + (pass ? "badge-green" : "badge-red") + '">' + (pass ? "通过" : "未通过") + "</span></div>" +
+      '<div class="grade-score" style="color:' + (pass ? "var(--success-text)" : "var(--danger-text)") + '">' + r.score +
+      '<span class="muted" style="font-size:14px;font-weight:400"> / 10</span></div>' +
+      '<p class="mt-8 mb-8">评语：' + esc(r.comment) + "</p>" +
+      '<div class="mb-8"><strong>关键点</strong><ul class="mt-8">' +
+      r.keyPoints.map(function (k) { return "<li>" + esc(k) + "</li>"; }).join("") + "</ul></div>" +
+      '<div class="mb-0"><strong>参考答案</strong><div class="text-2" style="background:#fff;border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin-top:6px">' +
+      esc(q.refAnswer || q.analysis) + "</div></div></div>";
+  }
+
+  function renderQuestion() {
+    var q = curQ();
+    var graded = isGraded(q.id);
+    var ans = ansOf(q.id);
+    var diffCls = { easy: "badge-green", medium: "badge-orange", hard: "badge-red" }[q.difficulty] || "badge";
+    var html =
+      '<div class="flex-between"><div class="q-type-row">' +
+      '<span class="badge badge-blue">' + DB.typeLabel[q.type] + "</span>" +
+      '<span class="badge ' + diffCls + '">' + DB.diffLabel[q.difficulty] + "</span>" +
+      '<span class="muted" style="font-size:12px">第 ' + (st.current + 1) + " / " + st.seq.length + " 题</span></div>" +
+      '<button class="btn btn-ghost btn-sm" id="shortcut-btn" title="快捷键帮助">？ 快捷键</button></div>' +
+      '<div class="q-stem-lg">' + esc(q.title) + "</div>";
+
+    if (q.type === "short") {
+      html += '<textarea class="textarea" id="short-input" style="min-height:140px" placeholder="请输入你的答案……"' +
+        (graded ? " readonly" : "") + ">" + esc(ans) + "</textarea>";
+      if (st.grading[q.id]) {
+        html += '<div class="ai-loading mt-16"><span class="muted">AI 评分中</span>' +
+          '<div class="typing-indicator"><span></span><span></span><span></span></div></div>';
+      } else if (graded) {
+        html += '<div class="mt-16">' + gradeCardHtml(q, st.results[q.id]) + "</div>";
+      } else {
+        html += '<div class="mt-16"><button class="btn btn-primary" id="submit-btn">提交答案</button></div>';
+      }
+    } else {
+      html += '<div class="opt-list">';
+      q.options.forEach(function (o) {
+        var cls = "opt-item";
+        if (graded) {
+          cls += " locked";
+          if (q.answer.indexOf(o.key) >= 0) cls += " correct";
+          else if (ans.indexOf(o.key) >= 0) cls += " wrong";
+        } else if (ans.indexOf(o.key) >= 0) {
+          cls += " selected";
+        }
+        html += '<div class="' + cls + '" data-opt="' + o.key + '"><span class="opt-key">' + o.key +
+          '</span><span>' + esc(o.text) + "</span></div>";
+      });
+      html += "</div>";
+      if (!graded) {
+        html += '<div style="margin-bottom:22px"><button class="btn btn-primary" id="submit-btn">提交答案</button></div>';
+      } else {
+        html += analysisCardHtml(q);
+      }
+    }
+
+    html += '<div class="practice-footer-actions">' +
+      '<button class="btn" id="prev-btn"' + (st.current === 0 ? " disabled" : "") + ">‹ 上一题</button>" +
+      '<button class="btn" id="analysis-btn">查看解析</button>' +
+      '<button class="btn btn-primary" id="next-btn">' + (isLast() ? "完成" : "下一题 ›") + "</button></div>";
+
+    document.getElementById("question-panel").innerHTML = html;
+    bindQuestion(q);
+  }
+
+  function renderAll() { renderSide(); renderQuestion(); }
+
+  /* ---------- 答题区事件 ---------- */
+  function bindQuestion(q) {
+    var submitBtn = document.getElementById("submit-btn");
+    if (submitBtn) submitBtn.addEventListener("click", submitCurrent);
+
+    if (q.type !== "short" && !isGraded(q.id)) {
+      document.querySelectorAll("#question-panel [data-opt]").forEach(function (el) {
+        el.addEventListener("click", function () {
+          var key = el.dataset.opt;
+          var ans = ansOf(q.id);
+          if (q.type === "multi") {
+            var idx = ans.indexOf(key);
+            if (idx >= 0) ans = ans.slice(0, idx) + ans.slice(idx + 1);
+            else ans = (ans + key).split("").sort().join("");
+            st.answers[q.id] = ans;
+          } else {
+            st.answers[q.id] = key; /* 单选 / 判断互斥 */
+          }
+          save();
+          renderQuestion();
+          renderSide();
+        });
+      });
+    }
+
+    var shortInput = document.getElementById("short-input");
+    if (shortInput && !isGraded(q.id)) {
+      shortInput.addEventListener("input", function () {
+        st.answers[q.id] = shortInput.value;
+        save();
+        renderSide();
+      });
+    }
+
+    document.getElementById("prev-btn").addEventListener("click", prev);
+    document.getElementById("next-btn").addEventListener("click", next);
+    document.getElementById("analysis-btn").addEventListener("click", viewAnalysis);
+    document.getElementById("shortcut-btn").addEventListener("click", openShortcut);
+  }
+
+  /* ---------- 导航 ---------- */
+  function goTo(i) {
+    if (!st || i < 0 || i >= st.seq.length) return;
+    st.current = i;
+    save();
+    renderAll();
+  }
+  function prev() { if (st.current > 0) goTo(st.current - 1); }
+  function canLeave() {
+    var q = curQ();
+    if (q.type === "short" && !isGraded(q.id) && !st.grading[q.id]) {
+      UI.toast("请先提交答案再进入下一题", "warn");
+      return false;
+    }
+    return true;
+  }
+  function next() {
+    if (isLast()) { endPractice(); return; }
+    if (!canLeave()) return;
+    goTo(st.current + 1);
+  }
+  function viewAnalysis() {
+    var q = curQ();
+    if (!isGraded(q.id)) {
+      UI.toast("请先提交答案", "warn");
+      return;
+    }
+    var card = document.getElementById("analysis-card");
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  /* ---------- 提交与批改 ---------- */
+  function submitCurrent() {
+    if (!st) return;
+    var q = curQ();
+    if (isGraded(q.id) || st.grading[q.id]) return;
+    var ans = ansOf(q.id);
+
+    if (q.type === "short") {
+      if (!String(ans).trim()) { UI.toast("请先输入答案", "warn"); return; }
+      st.grading[q.id] = true;
+      save();
+      renderQuestion(); /* 「AI 评分中…」打字动画 */
+      setTimeout(function () {
+        if (!st) return;
+        st.grading[q.id] = false;
+        st.graded[q.id] = true;
+        var g = q.aiGrade || fallbackGrade();
+        st.results[q.id] = { score: g.score, comment: g.comment, keyPoints: g.keyPoints.slice() };
+        save();
+        renderAll();
+        UI.toast("AI 评分完成：" + g.score + " / 10", g.score >= 6 ? "success" : "warn");
+      }, 1200);
+    } else {
+      if (!String(ans).length) { UI.toast("请先选择答案", "warn"); return; }
+      var correct = q.type === "multi"
+        ? ans.split("").sort().join("") === q.answer.split("").sort().join("")
+        : ans === q.answer;
+      st.graded[q.id] = true;
+      st.results[q.id] = correct ? "correct" : "wrong";
+      save();
+      renderAll();
+    }
+  }
+
+  /* ---------- 结束练习（三分支） ---------- */
+  function endPractice() {
+    if (!st) return;
+    /* 分支 1：存在未提交简答题 → toast 并跳到该题 */
+    var pendingShort = -1;
+    for (var i = 0; i < st.seq.length; i++) {
+      var q = qById[st.seq[i]];
+      if (q.type === "short" && !isGraded(q.id) && !st.grading[q.id]) { pendingShort = i; break; }
+    }
+    if (pendingShort >= 0) {
+      UI.toast("还有简答题未提交，请先完成作答", "warn");
+      goTo(pendingShort);
+      return;
+    }
+    /* 分支 2/3：二次确认（含「还有 N 道题未完成」分支） */
+    var undone = 0;
+    st.seq.forEach(function (id) { if (!isGraded(id)) undone++; });
+    var html = esc("确定要结束本次练习吗？结束后本次进度将被清除。");
+    if (undone > 0) html += "<br>" + esc("还有 " + undone + " 道题未完成");
+    UI.confirm({ title: "结束练习", html: html, okText: "结束练习", danger: true }).then(function (ok) {
+      if (!ok) return;
+      stopTimer();
+      clearSaved();
+      st = null;
+      UI.toast("练习已结束");
+      setTimeout(function () { location.href = "questions.html"; }, 400);
+    });
+  }
+
+  /* ---------- 模式选择弹窗 ---------- */
+  function openMode() { UI.openModal("mode-modal"); }
+  function startPractice(mode) {
+    var seq = pool.map(function (q) { return q.id; });
+    if (mode === "random") shuffle(seq);
+    st = { seq: seq, current: 0, answers: {}, graded: {}, results: {}, grading: {}, elapsed: 0, mode: mode, title: title };
+    save();
+    UI.closeModal("mode-modal");
+    renderAll();
+    startTimer();
+  }
+  function abandonPractice() {
+    UI.closeModal("mode-modal");
+    location.href = "questions.html"; /* ✕ / Esc = 放弃本次练习 */
+  }
+
+  /* ---------- 续做弹窗 ---------- */
+  function openResume() { UI.openModal("resume-modal"); }
+  function doResume() {
+    UI.closeModal("resume-modal");
+    var saved = normalize(loadSaved());
+    if (!saved) { clearSaved(); openMode(); return; }
+    st = saved;
+    save();
+    renderAll();
+    startTimer(); /* 恢复全部状态含计时器 */
+    UI.toast("已恢复上次练习进度");
+  }
+  function doRestart() {
+    clearSaved();
+    UI.closeModal("resume-modal");
+    openMode();
+  }
+
+  function openShortcut() { UI.openModal("shortcut-modal"); }
+
+  /* ---------- 弹窗按钮 ---------- */
+  document.getElementById("mode-cancel").addEventListener("click", abandonPractice);
+  document.querySelectorAll("#mode-modal [data-mode]").forEach(function (el) {
+    el.addEventListener("click", function () { startPractice(el.dataset.mode); });
+  });
+  document.getElementById("resume-continue").addEventListener("click", doResume);
+  document.getElementById("resume-restart").addEventListener("click", doRestart);
+  document.getElementById("resume-close").addEventListener("click", doResume); /* ✕ 视为继续，保留进度 */
+
+  /* Esc：模式弹窗=放弃；续做弹窗=继续（两个弹窗 data-static，ui.js 不自动关） */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var modeModal = document.getElementById("mode-modal");
+    if (modeModal && !modeModal.hidden) { e.preventDefault(); abandonPractice(); return; }
+    var resumeModal = document.getElementById("resume-modal");
+    if (resumeModal && !resumeModal.hidden) { e.preventDefault(); doResume(); }
+  });
+
+  /* ---------- 快捷键：← → Enter ?（输入框聚焦时忽略） ---------- */
+  document.addEventListener("keydown", function (e) {
+    if (!st) return;
+    if (document.querySelector(".modal-overlay:not([hidden])")) return;
+    var t = e.target;
+    var tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      prev();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      next();
+    } else if (e.key === "Enter") {
+      if (t && t.closest && t.closest("button, a")) return; /* 避免与按钮原生回车重复触发 */
+      e.preventDefault();
+      var q = curQ();
+      if (!isGraded(q.id) && !st.grading[q.id]) {
+        var hasAns = q.type === "short" ? String(ansOf(q.id)).trim() : String(ansOf(q.id)).length;
+        if (hasAns) submitCurrent();
+        else UI.toast(q.type === "short" ? "请先输入答案" : "请先选择答案", "warn");
+      } else {
+        next();
+      }
+    } else if (e.key === "?") {
+      e.preventDefault();
+      openShortcut();
+    }
+  });
+
+  /* ---------- 启动：续做检查 → 模式选择 ---------- */
+  (function boot() {
+    if (preferRandom) {
+      var rc = document.querySelector('#mode-modal [data-mode="random"]');
+      if (rc) rc.classList.add("selected"); /* ?mode=random：随机练习卡预选 */
+    }
+    var saved = loadSaved();
+    var norm = saved ? normalize(saved) : null;
+    if (norm) {
+      openResume();
+    } else {
+      if (saved) clearSaved();
+      openMode();
+    }
+  })();
+})();
+</script>
+</body>
+</html>

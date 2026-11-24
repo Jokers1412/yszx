@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 模拟面试 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  .run-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 12px; }
+  .run-top .rt-title { font-size: 17px; font-weight: 700; margin: 0; }
+  .run-top .rt-meta { font-size: 12px; color: var(--ink-3); }
+  .run-top .rt-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .net-badge { cursor: pointer; user-select: none; }
+  .run-timer { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
+  .voice-box { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .run-progress { display: flex; align-items: center; gap: 12px; padding: 10px 16px; margin-bottom: 12px; }
+  .run-progress .rp-text { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+  .run-progress .progress { flex: 1; }
+  .iv-status-bubble .iv-bubble { color: var(--ink-3); font-style: italic; }
+  .fb-score { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .fb-score span { font-size: 12px; font-weight: 400; color: var(--ink-3); }
+  .score-green { color: var(--success-text); }
+  .score-orange { color: var(--warning-text); }
+  .score-red { color: var(--danger-text); }
+  .fb-keypoints { margin: 8px 0 0; padding-left: 1.1em; font-size: 13px; color: var(--ink-2); }
+  .fb-keypoints li { margin-bottom: 2px; }
+  .side-head { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+  .side-head h3 { margin: 0; font-size: 15px; }
+  .side-toggle { border: none; background: none; cursor: pointer; font-size: 13px; color: var(--ink-3); padding: 2px 6px; }
+  .stat-line { display: flex; align-items: center; justify-content: space-between; padding: 7px 2px; font-size: 13px; border-bottom: 1px dashed var(--line); }
+  .stat-line:last-child { border-bottom: none; }
+  .stat-line .sl-val { font-weight: 600; }
+  .net-hint { color: var(--danger-text); font-size: 12px; white-space: nowrap; }
+  .iv-input-bar .textarea { flex: 1; }
+</style>
+</head>
+<body data-page="interview-run">
+<header id="site-header"></header>
+<div class="container" style="padding:24px 24px 64px">
+
+  <div class="card run-top">
+    <button class="btn btn-sm" id="btn-exit">← 退出面试</button>
+    <div>
+      <h2 class="rt-title">AI 模拟面试</h2>
+      <div class="rt-meta" id="rt-meta">AI应用与智能体开发 · 中等</div>
+    </div>
+    <div class="rt-right">
+      <span class="badge badge-green net-badge" id="net-badge" title="点击模拟断网 / 恢复">● 在线</span>
+      <span class="run-timer" id="timer">00:00:00</span>
+      <span class="badge badge-blue" id="q-progress">题目 1/10</span>
+      <span class="voice-box">
+        <label class="switch"><input type="checkbox" id="voice-switch" checked><span class="slider"></span></label>
+        语音播报
+      </span>
+      <button class="btn btn-danger btn-sm" id="btn-end">结束面试</button>
+    </div>
+  </div>
+
+  <div class="card run-progress">
+    <span class="rp-text" id="rp-text">答题进度 0/10</span>
+    <div class="progress"><div class="progress-bar" id="rp-bar" style="width:0%"></div></div>
+    <span class="badge badge-orange" id="rp-diff">中等</span>
+  </div>
+
+  <div class="iv-layout">
+    <div class="card iv-chat-card">
+      <div class="iv-chat-body" id="chat-body"></div>
+      <div class="iv-input-bar">
+        <span class="net-hint hidden" id="net-hint">网络已断开，发送暂不可用</span>
+        <textarea class="textarea" id="input-box" placeholder="输入你的回答…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button class="btn" id="btn-voice">🎤 语音输入</button>
+        <button class="btn btn-primary" id="btn-send">发送</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="iv-side-card card">
+        <div class="side-head" data-panel="q-panel"><h3>面试题目</h3><button class="side-toggle">▾</button></div>
+        <div id="q-panel" style="margin-top:10px"></div>
+      </div>
+      <div class="iv-side-card card">
+        <div class="side-head" data-panel="stat-panel"><h3>面试统计</h3><button class="side-toggle">▾</button></div>
+        <div id="stat-panel" style="margin-top:6px">
+          <div class="stat-line"><span>已回答</span><span class="sl-val" id="st-answered">0</span></div>
+          <div class="stat-line"><span>总题数</span><span class="sl-val" id="st-total">10</span></div>
+          <div class="stat-line"><span>平均分</span><span class="sl-val" id="st-avg">—</span></div>
+          <div class="stat-line"><span>已用时间</span><span class="sl-val" id="st-time">0 秒</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<footer id="site-footer"></footer>
+
+<div class="modal-overlay" id="resume-modal" hidden data-static="true">
+  <div class="modal modal-sm">
+    <div class="modal-header"><h3>是否继续上次的面试？</h3></div>
+    <div class="modal-body">
+      <p class="mb-0 text-2" id="resume-detail">已完成 0/10 题 · 用时 0 秒</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="btn-restart">重新开始</button>
+      <button class="btn btn-primary" id="btn-continue">继续</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+  if (!YS.auth.requireLogin()) return;
+
+  var LS_CFG = "yszx_iv_config", LS_SESSION = "yzsx_iv_session";
+  var STEP = 800; /* 分析中 → 评分中 → 思考中 每段间隔 */
+
+  /* ---------- 配置 ---------- */
+  function loadCfg() {
+    var def = { direction: "AI应用与智能体开发", difficulty: "medium", difficultyName: "中等", count: 10, timeout: 5 };
+    try {
+      var c = JSON.parse(localStorage.getItem(LS_CFG));
+      if (c && c.direction) return c;
+    } catch (e) {}
+    return def;
+  }
+  var cfg = loadCfg();
+  var script = DB.interviewScript;
+  function qAt(i) { return script[i % script.length]; }
+
+  /* ---------- 会话状态 ---------- */
+  var session = {
+    cfg: cfg, messages: [], currentQ: 0, answered: 0, elapsed: 0,
+    scores: [], pendingQ: -1, finished: false, voiceOn: true
+  };
+  function save() {
+    try { localStorage.setItem(LS_SESSION, JSON.stringify(session)); } catch (e) {}
+  }
+  function loadSession() {
+    try { return JSON.parse(localStorage.getItem(LS_SESSION)); } catch (e) { return null; }
+  }
+
+  /* ---------- 语音播报 ---------- */
+  function speak(text) {
+    if (!("speechSynthesis" in window)) {
+      UI.toast("当前浏览器不支持朗读", "warn");
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = "zh-CN";
+      window.speechSynthesis.speak(u);
+    } catch (e) {
+      UI.toast("当前浏览器不支持朗读", "warn");
+    }
+  }
+
+  /* ---------- 消息渲染 ---------- */
+  function nowHM() {
+    var d = new Date();
+    return (d.getHours() < 10 ? "0" : "") + d.getHours() + ":" + (d.getMinutes() < 10 ? "0" : "") + d.getMinutes();
+  }
+  function scoreClass(s) { return s >= 8 ? "score-green" : (s >= 6 ? "score-orange" : "score-red"); }
+  var chatBody = UI.$("#chat-body");
+
+  function renderMsg(m) {
+    var el = document.createElement("div");
+    el.className = "iv-msg " + (m.role === "me" ? "me" : "ai") + (m.kind === "status" ? " iv-status-bubble" : "");
+    if (m.qi != null && m.kind === "question") el.id = "qmsg-" + m.qi;
+    var avatar = m.role === "me" ? "我" : "AI";
+    var inner = "";
+    if (m.kind === "feedback") {
+      inner =
+        '<div class="fb-score ' + scoreClass(m.score) + '">' + m.score + '<span> / 10</span></div>' +
+        '<div>' + UI.esc(m.text) + "</div>" +
+        (m.keypoints && m.keypoints.length
+          ? '<ul class="fb-keypoints">' + m.keypoints.map(function (k) { return "<li>" + UI.esc(k) + "</li>"; }).join("") + "</ul>"
+          : "");
+    } else if (m.kind === "typing") {
+      inner = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+    } else {
+      inner = UI.esc(m.text);
+    }
+    el.innerHTML =
+      '<div class="iv-avatar">' + avatar + "</div>" +
+      '<div><div class="iv-bubble">' + inner + "</div>" +
+      '<div class="iv-time">' + UI.esc(m.t || nowHM()) +
+      (m.role === "ai" && m.kind !== "typing" && m.kind !== "status"
+        ? ' · <button class="iv-replay">重播朗读</button>' : "") +
+      "</div></div>";
+    var replay = el.querySelector(".iv-replay");
+    if (replay) {
+      replay.addEventListener("click", function () {
+        speak(m.kind === "feedback" ? ("评分 " + m.score + " 分。" + m.text) : m.text);
+      });
+    }
+    chatBody.appendChild(el);
+    chatBody.scrollTop = chatBody.scrollHeight;
+    return el;
+  }
+
+  function pushMsg(m) {
+    m.t = m.t || nowHM();
+    session.messages.push(m);
+    renderMsg(m);
+    if (m.role === "ai" && m.kind !== "typing" && m.kind !== "status" && session.voiceOn) {
+      speak(m.kind === "feedback" ? ("评分 " + m.score + " 分。" + m.text) : m.text);
+    }
+    save();
+  }
+
+  /* ---------- 侧边栏 ---------- */
+  function shortQ(q) { return q.length > 12 ? q.slice(0, 12) + "…" : q; }
+  function renderSide() {
+    var html = "";
+    for (var i = 0; i < cfg.count; i++) {
+      var got = i < session.scores.length;
+      html +=
+        '<div class="iv-q-item' + (i === session.currentQ && !session.finished ? " current" : "") + '" data-q="' + i + '">' +
+        "<span>" + (i + 1) + ".</span><span>" + UI.esc(shortQ(qAt(i).q)) + "</span>" +
+        (got ? '<span class="ivq-score ' + scoreClass(session.scores[i]) + '">' + session.scores[i] + "</span>" : '<span class="ivq-score muted">—</span>') +
+        "</div>";
+    }
+    UI.$("#q-panel").innerHTML = html;
+    UI.$("#st-answered").textContent = session.answered;
+    UI.$("#st-total").textContent = cfg.count;
+    UI.$("#st-avg").textContent = session.scores.length
+      ? (session.scores.reduce(function (a, b) { return a + b; }, 0) / session.scores.length).toFixed(1)
+      : "—";
+    UI.$("#st-time").textContent = UI.fmtHumanDur(session.elapsed);
+    UI.$("#q-progress").textContent = "题目 " + Math.min(session.answered + 1, cfg.count) + "/" + cfg.count;
+    UI.$("#rp-text").textContent = "答题进度 " + session.answered + "/" + cfg.count;
+    UI.$("#rp-bar").style.width = Math.round(session.answered / cfg.count * 100) + "%";
+    UI.$("#timer").textContent = UI.fmtClock(session.elapsed);
+    UI.$("#rt-meta").textContent = cfg.direction + " · " + (cfg.difficultyName || DB.diffLabel[cfg.difficulty] || "中等");
+    UI.$("#rp-diff").textContent = cfg.difficultyName || DB.diffLabel[cfg.difficulty] || "中等";
+  }
+  UI.$("#q-panel").addEventListener("click", function (e) {
+    var item = e.target.closest(".iv-q-item");
+    if (!item) return;
+    var target = document.getElementById("qmsg-" + item.dataset.q);
+    if (target) {
+      chatBody.scrollTo({ top: target.offsetTop - chatBody.offsetTop - 12, behavior: "smooth" });
+    } else {
+      UI.toast("该题尚未开始", "warn");
+    }
+  });
+  /* 面板折叠 */
+  UI.$$(".side-head").forEach(function (head) {
+    head.addEventListener("click", function () {
+      var body = document.getElementById(head.dataset.panel);
+      var toggle = head.querySelector(".side-toggle");
+      var collapsed = !body.classList.contains("hidden");
+      body.classList.toggle("hidden", collapsed);
+      toggle.textContent = collapsed ? "▸" : "▾";
+    });
+  });
+
+  /* ---------- 计时器 ---------- */
+  setInterval(function () {
+    if (session.finished) return;
+    session.elapsed += 1;
+    UI.$("#timer").textContent = UI.fmtClock(session.elapsed);
+    UI.$("#st-time").textContent = UI.fmtHumanDur(session.elapsed);
+    if (session.elapsed % 5 === 0) save();
+  }, 1000);
+
+  /* ---------- 网络状态（点击切换，模拟断网） ---------- */
+  var online = true;
+  UI.$("#net-badge").addEventListener("click", function () {
+    online = !online;
+    var b = UI.$("#net-badge");
+    b.textContent = online ? "● 在线" : "● 离线";
+    b.className = "badge net-badge " + (online ? "badge-green" : "badge-red");
+    UI.$("#net-hint").classList.toggle("hidden", online);
+    UI.toast(online ? "网络已恢复" : "已切换为离线（模拟）", online ? "success" : "warn");
+  });
+
+  /* ---------- 语音播报开关 ---------- */
+  UI.$("#voice-switch").addEventListener("change", function () {
+    session.voiceOn = UI.$("#voice-switch").checked;
+    save();
+    UI.toast(session.voiceOn ? "语音播报已开启" : "语音播报已关闭");
+    if (!session.voiceOn && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  });
+
+  /* ---------- 作答流程：分析中 → 评分中 → 思考中 → 评分气泡 → 下一题 ---------- */
+  var busy = false;
+  function analyze(qi, skipUser) {
+    busy = true;
+    session.pendingQ = qi;
+    save();
+    var statusEl = renderMsg({ role: "ai", kind: "status", text: "AI面试官正在分析你的回答..." });
+    setTimeout(function () {
+      statusEl.querySelector(".iv-bubble").textContent = "评分中…";
+      setTimeout(function () {
+        statusEl.remove();
+        var typingEl = renderMsg({ role: "ai", kind: "typing", text: "" });
+        setTimeout(function () {
+          typingEl.remove();
+          var fb = qAt(qi).feedback;
+          session.pendingQ = -1;
+          session.scores[qi] = fb.score;
+          session.answered = session.scores.length;
+          pushMsg({
+            role: "ai", kind: "feedback", qi: qi, score: fb.score,
+            text: fb.comment, keypoints: fb.keypoints
+          });
+          renderSide();
+          if (session.answered >= cfg.count) {
+            finishAll();
+          } else {
+            session.currentQ = session.answered;
+            askQuestion(session.currentQ);
+          }
+          busy = false;
+        }, STEP);
+      }, STEP);
+    }, STEP);
+  }
+
+  function askQuestion(i) {
+    pushMsg({ role: "ai", kind: "question", qi: i, text: qAt(i).q });
+    renderSide();
+    save();
+  }
+
+  function finishAll() {
+    session.finished = true;
+    save();
+    pushMsg({
+      role: "ai", kind: "closing",
+      text: "以上就是本次面试的全部问题，感谢你的作答！完整评分与改进建议已生成，你可以前往面试报告查看。"
+    });
+    UI.confirm({
+      title: "是否查看面试报告？",
+      text: "本次面试已完成，是否立即查看面试报告？",
+      okText: "查看报告", cancelText: "暂不"
+    }).then(function (ok) {
+      if (ok) location.href = "interview-report.html";
+    });
+  }
+
+  /* ---------- 发送 ---------- */
+  function send() {
+    var box = UI.$("#input-box");
+    var text = box.value.trim();
+    if (!text) return;
+    if (!online) {
+      UI.toast("网络已断开，无法发送，请恢复后重试", "error");
+      return;
+    }
+    if (busy || session.finished) {
+      UI.toast(session.finished ? "本次面试已结束" : "AI 面试官正在评分，请稍候", "warn");
+      return;
+    }
+    box.value = "";
+    pushMsg({ role: "me", kind: "text", text: text, qi: session.currentQ });
+    analyze(session.currentQ);
+  }
+  UI.$("#btn-send").addEventListener("click", send);
+  UI.$("#input-box").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+
+  /* ---------- 语音输入（模拟识别） ---------- */
+  var voiceSamples = [
+    "我在项目里用过 RAG 架构：先把文档切分并向量化入库，用户提问时检索相关片段注入提示词，再交给大模型生成答案。",
+    "我会先看调用日志定位循环点，加上最大步数限制和重复状态检测，再给工具调用加缓存与失败降级策略。",
+    "我做过最有挑战的是企业知识库问答项目，我负责检索链路优化，最大困难是召回不准，后来用重排序和引用溯源解决了。",
+    "我认为最需要补齐的是评估体系和工程化能力，包括效果评测、稳定性保障与成本优化，还要关注多模态等趋势。"
+  ];
+  var voiceIdx = 0;
+  UI.$("#btn-voice").addEventListener("click", function () {
+    if (!online) {
+      UI.toast("网络已断开，语音输入暂不可用", "error");
+      return;
+    }
+    UI.$("#btn-voice").disabled = true;
+    UI.toast("正在聆听…（模拟）");
+    setTimeout(function () {
+      UI.$("#input-box").value = voiceSamples[voiceIdx % voiceSamples.length];
+      voiceIdx += 1;
+      UI.$("#btn-voice").disabled = false;
+      UI.toast("已模拟语音识别");
+    }, 1000);
+  });
+
+  /* ---------- 退出 / 结束 ---------- */
+  UI.$("#btn-exit").addEventListener("click", function () {
+    UI.confirm({
+      title: "退出面试",
+      text: "退出后进度将保存，可随时回来继续。确定退出吗？",
+      okText: "退出", danger: true
+    }).then(function (ok) {
+      if (ok) {
+        save();
+        location.href = "interview-config.html";
+      }
+    });
+  });
+  UI.$("#btn-end").addEventListener("click", function () {
+    UI.confirm({
+      title: "结束面试",
+      text: "确定要结束本次面试吗？当前进度将保存并生成面试报告。",
+      okText: "结束并生成报告", danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      session.finished = true;
+      save();
+      location.href = "interview-report.html";
+    });
+  });
+
+  /* ---------- 新开一场 ---------- */
+  function freshStart() {
+    localStorage.removeItem(LS_SESSION);
+    session = {
+      cfg: cfg, messages: [], currentQ: 0, answered: 0, elapsed: 0,
+      scores: [], pendingQ: -1, finished: false, voiceOn: true
+    };
+    UI.$("#voice-switch").checked = true;
+    renderSide();
+    pushMsg({
+      role: "ai", kind: "opening",
+      text: "你好，我是你的 AI 面试官。本次为「" + cfg.direction + " · " + (cfg.difficultyName || DB.diffLabel[cfg.difficulty]) +
+        "」模拟面试，共 " + cfg.count + " 题，每题回答限时 " + cfg.timeout + " 分钟。我会根据你的回答给出评分与建议，放轻松，我们开始吧！"
+    });
+    session.currentQ = 0;
+    askQuestion(0);
+  }
+
+  /* ---------- 恢复会话 ---------- */
+  function renderAll() {
+    session.messages.forEach(renderMsg);
+    renderSide();
+  }
+  var saved = loadSession();
+  var resumable = saved && !saved.finished && (saved.messages || []).length > 0;
+  if (resumable) {
+    UI.$("#resume-detail").textContent =
+      "已完成 " + (saved.answered || 0) + "/" + (saved.cfg.count || cfg.count) + " 题 · 用时 " + UI.fmtHumanDur(saved.elapsed || 0);
+    UI.openModal("resume-modal");
+    UI.$("#btn-continue").addEventListener("click", function () {
+      UI.closeModal("resume-modal");
+      session = saved;
+      cfg = session.cfg || cfg;
+      session.voiceOn = session.voiceOn !== false;
+      UI.$("#voice-switch").checked = session.voiceOn;
+      renderAll();
+      UI.toast("已恢复上次的面试进度");
+      /* 中断在评分中的题：重新走一遍评分流程 */
+      if (session.pendingQ != null && session.pendingQ >= 0 && session.scores[session.pendingQ] == null) {
+        analyze(session.pendingQ, true);
+      }
+    });
+    UI.$("#btn-restart").addEventListener("click", function () {
+      UI.closeModal("resume-modal");
+      freshStart();
+    });
+  } else {
+    if (saved && saved.finished) localStorage.removeItem(LS_SESSION);
+    freshStart();
+  }
+})();
+</script>
+</body>
+</html>

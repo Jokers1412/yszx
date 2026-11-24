@@ -1,0 +1,150 @@
+/* ============================================================
+   管理端框架样式（对齐 prototype/assets/css/admin.css + base.css
+   的 dropdown/avatar/logo-mark 片段；02 约束 9：UI 以原型为基准）
+   ============================================================ */
+
+.admin-layout { display: flex; min-height: 100vh; }
+
+/* ---------- 侧边栏 ---------- */
+.admin-sidebar {
+  width: 220px; background: #101828; color: #98a2b3; flex-shrink: 0;
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  transition: width .2s ease; overflow-y: auto; overflow-x: hidden;
+}
+.admin-sidebar.collapsed { width: 60px; }
+.admin-sidebar.collapsed .sidebar-logo span,
+.admin-sidebar.collapsed .menu-group-title,
+.admin-sidebar.collapsed .menu-item span { display: none; }
+.admin-sidebar.collapsed .menu-item { justify-content: center; padding: 10px 0; }
+.sidebar-logo {
+  display: flex; align-items: center; gap: 10px; padding: 18px 16px; color: #fff;
+  font-size: 16px; font-weight: 700; white-space: nowrap; text-decoration: none;
+}
+.sidebar-logo:hover { color: #fff; }
+.logo-mark {
+  width: 30px; height: 30px; border-radius: 8px; background: var(--brand-grad); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700;
+  flex-shrink: 0;
+}
+.logo-img { object-fit: cover; }
+.menu-group { margin-bottom: 6px; }
+.menu-group-title {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px 6px; font-size: 15px; color: #98a2b3; letter-spacing: .5px; white-space: nowrap;
+  cursor: pointer; user-select: none; font-weight: 600;
+}
+.menu-group-title:hover { color: #fff; }
+.menu-group-title .group-icon { width: 18px; text-align: center; font-size: 15px; flex-shrink: 0; }
+.menu-group-title .group-arrow {
+  margin-left: auto; font-size: 11px; transition: transform .2s ease; line-height: 1;
+}
+.menu-group.collapsed .menu-group-title .group-arrow { transform: rotate(-90deg); }
+.menu-group.collapsed .menu-items { display: none; }
+/* 侧栏图标模式（60px）下忽略分组折叠与缩进，保证图标居中可点 */
+.admin-sidebar.collapsed .menu-items { display: block; padding-left: 0; }
+.menu-items { padding-left: 16px; }
+.menu-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px; margin: 1px 8px;
+  border-radius: 6px; color: #98a2b3; cursor: pointer; font-size: 13px; white-space: nowrap;
+  text-decoration: none; border: none; background: none; width: calc(100% - 16px); text-align: left;
+}
+.menu-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.menu-item.active { background: var(--brand); color: #fff; }
+.menu-item .mi-icon { width: 18px; text-align: center; font-size: 15px; flex-shrink: 0; }
+
+/* ---------- 主区 ---------- */
+.admin-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.admin-topbar {
+  height: 56px; background: var(--surface); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px; padding: 0 20px; position: sticky; top: 0; z-index: 700;
+}
+.admin-topbar .collapse-btn {
+  width: 32px; height: 32px; border: none; background: none; cursor: pointer; font-size: 17px;
+  color: var(--ink-2); border-radius: 6px;
+}
+.admin-topbar .collapse-btn:hover { background: var(--surface-2); }
+.admin-topbar .page-title { font-size: 15px; font-weight: 600; }
+.admin-topbar .topbar-logo {
+  width: 22px; height: 22px; border-radius: 5px; object-fit: cover; flex-shrink: 0;
+}
+.admin-topbar .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.admin-content { padding: 20px 24px 40px; flex: 1; }
+
+.bell-btn {
+  position: relative; width: 34px; height: 34px; border: none; background: none; cursor: pointer;
+  font-size: 18px; border-radius: 50%; color: var(--ink-2);
+}
+.bell-btn:hover { background: var(--surface-2); }
+.bell-btn .bell-badge {
+  position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; border-radius: 999px;
+  background: var(--danger); color: #fff; font-size: 10px; display: flex; align-items: center;
+  justify-content: center; padding: 0 4px;
+}
+.admin-user-trigger {
+  display: flex; align-items: center; gap: 8px; border: none; background: none; cursor: pointer;
+  padding: 4px 8px; border-radius: 999px; font-size: 13px; color: var(--ink-2);
+}
+.admin-user-trigger:hover { background: var(--surface-2); }
+
+/* ---------- 列表页工具栏（筛选 + 操作同行） ---------- */
+.list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+.list-toolbar .toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.list-toolbar .count-text {
+  font-size: 13px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* ---------- 表格操作列：单行展示、紧凑间距 ---------- */
+.el-table .actions-cell .cell {
+  white-space: nowrap;
+}
+.el-table .actions-cell .el-button {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.el-table .actions-cell .el-button + .el-button {
+  margin-left: 2px;
+}
+
+/* ---------- 头像 / 下拉（base.css 片段） ---------- */
+.avatar {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--brand-grad);
+  color: #fff; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 600; flex-shrink: 0;
+}
+.avatar.sm { width: 30px; height: 30px; font-size: 13px; }
+.avatar-img { object-fit: cover; }
+
+.dropdown { position: relative; }
+.dropdown-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); min-width: 160px; z-index: 900;
+  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  border: 1px solid var(--line); padding: 6px; display: none;
+}
+.dropdown.open .dropdown-menu { display: block; }
+.dropdown-menu .dropdown-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px;
+  border: none; background: none; border-radius: 6px; cursor: pointer; font-size: 13px;
+  color: var(--ink-2); text-align: left; text-decoration: none;
+}
+.dropdown-menu .dropdown-item:hover { background: var(--brand-light); color: var(--brand); }
+.dropdown-menu .dropdown-divider { height: 1px; background: var(--line); margin: 6px 4px; }
+.dropdown-menu .dropdown-item.danger { color: var(--danger-text); }
+.dropdown-menu .dropdown-item.danger:hover { background: var(--danger-bg); }

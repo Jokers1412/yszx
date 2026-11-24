@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云枢智学 · 学科管理</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  .btn-link:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-link:disabled:hover { text-decoration: none; color: var(--brand); }
+  .sa-ops .btn-link { padding: 2px 4px; }
+  .color-dot {
+    width: 26px; height: 26px; border-radius: 50%; cursor: pointer; display: inline-block;
+    border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  .color-dot.active { box-shadow: 0 0 0 2px var(--ink); }
+  .stage-mini-row.disabled { opacity: .55; }
+</style>
+</head>
+<body class="admin-body" data-page="subjects">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <!-- 统计卡片 -->
+      <div class="stat-card-grid" id="stat-grid"></div>
+
+      <!-- 工具行 -->
+      <div class="toolbar-row">
+        <div class="muted">共 <b id="subject-total">0</b> 个学科 · 上移 / 下移可调整展示顺序</div>
+        <div class="toolbar-right">
+          <button class="btn btn-primary" id="add-subject-btn">+ 新增学科</button>
+        </div>
+      </div>
+
+      <!-- 学科卡片网格 -->
+      <div class="subject-admin-grid" id="subject-grid"></div>
+
+    </main>
+  </div>
+</div>
+
+<!-- 学科表单弹窗 -->
+<div class="modal-overlay" id="subject-modal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="subject-modal-title">新增学科</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">学科名称<span class="req">*</span></label>
+        <input class="input" id="sf-name" placeholder="如：AI应用与智能体开发">
+        <div class="field-error" id="sf-name-err"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">学科图标 Emoji<span class="req">*</span></label>
+        <input class="input" id="sf-icon" placeholder="如：🤖">
+        <div class="field-error" id="sf-icon-err"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">学科描述<span class="req">*</span></label>
+        <textarea class="textarea" id="sf-desc" placeholder="一句话描述学科定位与培养目标"></textarea>
+        <div class="field-error" id="sf-desc-err"></div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label">排序号</label>
+          <input class="input" id="sf-sort" type="number" min="1" step="1">
+          <div class="field-hint">数字越小越靠前，保存后按此顺序展示</div>
+        </div>
+        <div class="field">
+          <label class="field-label">主题颜色<span class="req">*</span></label>
+          <div class="chip-row" id="sf-colors"></div>
+          <div class="field-hint">用于卡片图标底色等主题展示</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>取消</button>
+      <button class="btn btn-primary" id="subject-save-btn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 阶段表单弹窗 -->
+<div class="modal-overlay" id="stage-modal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="stage-modal-title">添加阶段</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">图标</label>
+        <input class="input" id="stf-icon" placeholder="留空默认 📌">
+        <div class="field-hint">留空默认 📌</div>
+      </div>
+      <div class="field">
+        <label class="field-label">阶段名称<span class="req">*</span></label>
+        <input class="input" id="stf-name" placeholder="如：大模型基础">
+        <div class="field-error" id="stf-name-err"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">排序号</label>
+        <input class="input" id="stf-sort" type="number" min="1" step="1">
+        <div class="field-hint">数字越小越靠前，保存后按此顺序展示</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>取消</button>
+      <button class="btn btn-primary" id="stage-save-btn">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+  var esc = UI.esc;
+
+  /* ---------- 内存数据（拷贝自 DB，页面会话内增删改真实生效） ---------- */
+  var subjects = JSON.parse(JSON.stringify(DB.subjects));
+  var courses = DB.courses;
+  var routes = DB.routes;
+  subjects.forEach(function (s, i) {
+    if (typeof s.sort !== "number") s.sort = i + 1;
+    s.stages.forEach(function (st, j) {
+      if (typeof st.sort !== "number") st.sort = j + 1;
+      if (typeof st.enabled !== "boolean") st.enabled = true;
+    });
+  });
+
+  var PALETTE = ["#2a78d6", "#6250d6", "#1baf7a", "#eb6834", "#e87ba4", "#008300", "#eda100", "#e34948"];
+
+  /* ---------- 工具 ---------- */
+  function tint(hex, a) {
+    hex = String(hex || "#2a78d6").replace("#", "");
+    if (hex.length === 3) hex = hex.replace(/./g, function (ch) { return ch + ch; });
+    var r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  }
+  function findSubject(id) {
+    for (var i = 0; i < subjects.length; i++) if (subjects[i].id === id) return subjects[i];
+    return null;
+  }
+  function findStage(s, id) {
+    for (var i = 0; i < s.stages.length; i++) if (s.stages[i].id === id) return s.stages[i];
+    return null;
+  }
+  function sQ(s) { return s.stages.reduce(function (a, b) { return a + (b.count || 0); }, 0); }
+  function courseCount(id) { return courses.filter(function (c) { return c.subjectIds.indexOf(id) >= 0; }).length; }
+  function routeCount(id) { return routes.filter(function (r) { return r.subjectId === id; }).length; }
+  function setErr(inputSel, errSel, msg) {
+    var inp = document.querySelector(inputSel);
+    if (inp) inp.classList.add("error");
+    var err = document.querySelector(errSel);
+    if (err) err.textContent = msg;
+  }
+  function clearErrs(scope) {
+    UI.$$(".error", scope).forEach(function (el) { el.classList.remove("error"); });
+    UI.$$(".field-error", scope).forEach(function (el) { el.textContent = ""; });
+  }
+  function statCard(label, value, icon) {
+    return '<div class="card stat-card"><div class="stat-top"><div class="stat-label">' + label +
+      '</div><div class="stat-icon">' + icon + '</div></div><div class="stat-value">' + value + "</div></div>";
+  }
+
+  /* ---------- 渲染 ---------- */
+  function renderStats() {
+    var total = subjects.length;
+    var withStages = subjects.filter(function (s) { return s.stages.length > 0; }).length;
+    var stageTotal = subjects.reduce(function (a, s) { return a + s.stages.length; }, 0);
+    var qTotal = subjects.reduce(function (a, s) { return a + sQ(s); }, 0);
+    document.getElementById("stat-grid").innerHTML =
+      statCard("总学科数", total, "📚") +
+      statCard("有阶段的学科", withStages, "🗂️") +
+      statCard("阶段总数", stageTotal, "🧩") +
+      statCard("题目总数", qTotal, "📝");
+    document.getElementById("subject-total").textContent = total;
+  }
+
+  function stageRow(s, st, j) {
+    var canUp = j > 0, canDown = j < s.stages.length - 1;
+    return '<div class="stage-mini-row' + (st.enabled ? "" : " disabled") + '" data-stid="' + st.id + '">' +
+      '<div class="sm-name">' + esc(st.icon || "📌") + " " + esc(st.name) + ' <span class="muted">' + (st.count || 0) + " 题</span></div>" +
+      '<button class="btn-link" data-act="st-up"' + (canUp ? "" : " disabled") + ">上移</button>" +
+      '<button class="btn-link" data-act="st-down"' + (canDown ? "" : " disabled") + ">下移</button>" +
+      '<label class="switch" title="' + (st.enabled ? "点击禁用该阶段" : "点击启用该阶段") + '"><input type="checkbox" data-act="st-toggle"' +
+        (st.enabled ? " checked" : "") + '><span class="slider"></span></label>' +
+      '<button class="btn-link" data-act="st-edit">编辑</button>' +
+      '<button class="btn-link danger" data-act="st-del">删除</button>' +
+    "</div>";
+  }
+
+  function subjectCard(s, idx) {
+    var canUp = idx > 0, canDown = idx < subjects.length - 1;
+    var stagesHtml = s.stages.length
+      ? s.stages.map(function (st, j) { return stageRow(s, st, j); }).join("")
+      : '<div class="stage-mini-row"><div class="sm-name muted">暂无阶段，点击下方「+ 添加阶段」录入</div></div>';
+    return '<div class="card subject-admin-card" data-sid="' + s.id + '">' +
+      '<div class="sa-head">' +
+        '<div class="sa-icon" style="background:' + tint(s.color, 0.16) + '">' + esc(s.icon) + "</div>" +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:15px">' + esc(s.name) +
+            '</b><span class="badge badge-blue">排序 ' + s.sort + "</span></div>" +
+          '<div class="muted" style="font-size:12px">' + esc(s.desc) + "</div>" +
+        "</div>" +
+        '<div class="sa-ops" style="white-space:nowrap">' +
+          '<button class="btn-link" data-act="sub-up"' + (canUp ? "" : " disabled") + ">上移</button>" +
+          '<button class="btn-link" data-act="sub-down"' + (canDown ? "" : " disabled") + ">下移</button>" +
+          '<button class="btn-link" data-act="sub-edit">编辑学科</button>' +
+          '<button class="btn-link danger" data-act="sub-del">删除学科</button>' +
+        "</div>" +
+      "</div>" +
+      '<div class="sa-stats">' +
+        "<span><b>" + courseCount(s.id) + "</b>课程数</span>" +
+        "<span><b>" + routeCount(s.id) + "</b>路线数</span>" +
+        "<span><b>" + sQ(s) + "</b>题目数</span>" +
+      "</div>" +
+      stagesHtml +
+      '<div style="padding:12px 20px"><button class="btn btn-sm" data-act="stage-add">+ 添加阶段</button></div>' +
+    "</div>";
+  }
+
+  function renderGrid() {
+    var grid = document.getElementById("subject-grid");
+    if (!subjects.length) {
+      grid.innerHTML = '<div class="card" style="grid-column:1/-1"><div class="empty-state">' +
+        '<div class="empty-icon">📚</div><div class="empty-title">暂无学科</div>' +
+        '<div class="empty-sub">点击右上角「+ 新增学科」创建第一个学科</div></div></div>';
+      return;
+    }
+    grid.innerHTML = subjects.map(subjectCard).join("");
+  }
+
+  function render() { renderStats(); renderGrid(); }
+
+  /* ---------- 排序 ---------- */
+  function reposition(list, item, sort) {
+    var idx = list.indexOf(item);
+    if (idx >= 0) list.splice(idx, 1);
+    var target = Math.min(Math.max((sort || 1) - 1, 0), list.length);
+    list.splice(target, 0, item);
+    list.forEach(function (x, i) { x.sort = i + 1; });
+  }
+  function move(list, item, delta) {
+    var i = list.indexOf(item), j = i + delta;
+    if (i < 0 || j < 0 || j >= list.length) return false;
+    var tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+    list.forEach(function (x, k) { x.sort = k + 1; });
+    return true;
+  }
+
+  /* ---------- 学科表单 ---------- */
+  var sf = { id: null, color: PALETTE[0] };
+
+  function renderColorDots() {
+    document.getElementById("sf-colors").innerHTML = PALETTE.map(function (c) {
+      return '<span class="color-dot' + (c === sf.color ? " active" : "") + '" data-color="' + c + '" style="background:' + c + '" title="' + c + '"></span>';
+    }).join("");
+  }
+
+  function openSubjectModal(sid) {
+    var s = sid ? findSubject(sid) : null;
+    sf.id = s ? s.id : null;
+    sf.color = s ? s.color : PALETTE[0];
+    document.getElementById("sf-name").value = s ? s.name : "";
+    document.getElementById("sf-icon").value = s ? s.icon : "";
+    document.getElementById("sf-desc").value = s ? s.desc : "";
+    document.getElementById("sf-sort").value = s ? s.sort : subjects.length + 1;
+    renderColorDots();
+    clearErrs(document.getElementById("subject-modal"));
+    document.getElementById("subject-modal-title").textContent = s ? "编辑学科" : "新增学科";
+    UI.openModal("subject-modal");
+    document.getElementById("sf-name").focus();
+  }
+
+  function saveSubject() {
+    var name = document.getElementById("sf-name").value.trim();
+    var icon = document.getElementById("sf-icon").value.trim();
+    var desc = document.getElementById("sf-desc").value.trim();
+    var sort = parseInt(document.getElementById("sf-sort").value, 10);
+    clearErrs(document.getElementById("subject-modal"));
+    var ok = true;
+    if (!name) { setErr("#sf-name", "#sf-name-err", "请输入学科名称"); ok = false; }
+    if (!icon) { setErr("#sf-icon", "#sf-icon-err", "请输入学科图标 Emoji"); ok = false; }
+    if (!desc) { setErr("#sf-desc", "#sf-desc-err", "请输入学科描述"); ok = false; }
+    if (!ok) { UI.toast("请完善必填项", "warn"); return; }
+    if (isNaN(sort) || sort < 1) sort = subjects.length + 1;
+
+    if (sf.id) {
+      var s = findSubject(sf.id);
+      s.name = name; s.icon = icon; s.desc = desc; s.color = sf.color;
+      reposition(subjects, s, sort);
+      UI.toast("学科「" + name + "」已保存");
+    } else {
+      var ns = { id: "sub-" + Date.now(), icon: icon, name: name, desc: desc, color: sf.color, sort: sort, stages: [] };
+      subjects.push(ns);
+      reposition(subjects, ns, sort);
+      UI.toast("新增学科「" + name + "」成功");
+    }
+    UI.closeModal("subject-modal");
+    render();
+  }
+
+  function deleteSubject(sid) {
+    var s = findSubject(sid);
+    if (!s) return;
+    var stN = s.stages.length, qN = sQ(s), msg;
+    if (stN > 0 && qN > 0) {
+      msg = "该学科下有 " + stN + " 个阶段、" + qN + " 道题目，删除后这些阶段与题目将一并删除（逻辑删除，数据保留可恢复）。确定删除学科「" + esc(s.name) + "」吗？";
+    } else if (stN > 0) {
+      msg = "该学科下有 " + stN + " 个阶段，删除后将一并删除（逻辑删除，数据保留可恢复）。确定删除学科「" + esc(s.name) + "」吗？";
+    } else {
+      msg = "确定删除学科「" + esc(s.name) + "」吗？删除后数据保留可恢复。";
+    }
+    UI.confirm({ title: "删除学科", html: msg, okText: "删除", danger: true }).then(function (ok) {
+      if (!ok) return;
+      subjects.splice(subjects.indexOf(s), 1);
+      subjects.forEach(function (x, k) { x.sort = k + 1; });
+      UI.toast("已删除学科「" + s.name + "」");
+      render();
+    });
+  }
+
+  /* ---------- 阶段表单 ---------- */
+  var stf = { sid: null, stid: null };
+
+  function openStageModal(sid, stid) {
+    var s = findSubject(sid);
+    if (!s) return;
+    var st = stid ? findStage(s, stid) : null;
+    stf.sid = sid; stf.stid = st ? st.id : null;
+    document.getElementById("stf-icon").value = st ? (st.icon || "") : "";
+    document.getElementById("stf-name").value = st ? st.name : "";
+    document.getElementById("stf-sort").value = st ? st.sort : s.stages.length + 1;
+    clearErrs(document.getElementById("stage-modal"));
+    document.getElementById("stage-modal-title").textContent = st ? "编辑阶段" : "添加阶段";
+    UI.openModal("stage-modal");
+    document.getElementById("stf-name").focus();
+  }
+
+  function saveStage() {
+    var s = findSubject(stf.sid);
+    if (!s) return;
+    var icon = document.getElementById("stf-icon").value.trim() || "📌";
+    var name = document.getElementById("stf-name").value.trim();
+    var sort = parseInt(document.getElementById("stf-sort").value, 10);
+    clearErrs(document.getElementById("stage-modal"));
+    if (!name) { setErr("#stf-name", "#stf-name-err", "请输入阶段名称"); UI.toast("请完善必填项", "warn"); return; }
+    if (isNaN(sort) || sort < 1) sort = s.stages.length + 1;
+
+    if (stf.stid) {
+      var st = findStage(s, stf.stid);
+      st.icon = icon; st.name = name;
+      reposition(s.stages, st, sort);
+      UI.toast("阶段「" + name + "」已保存");
+    } else {
+      var nst = { id: "st-" + Date.now(), icon: icon, name: name, count: 0, sort: sort, enabled: true };
+      s.stages.push(nst);
+      reposition(s.stages, nst, sort);
+      UI.toast("已为「" + s.name + "」添加阶段「" + name + "」");
+    }
+    UI.closeModal("stage-modal");
+    render();
+  }
+
+  function deleteStage(sid, stid) {
+    var s = findSubject(sid);
+    if (!s) return;
+    var st = findStage(s, stid);
+    if (!st) return;
+    var msg = (st.count || 0) > 0
+      ? "该阶段下有 " + st.count + " 道题目，删除后题目将一并删除（逻辑删除，数据保留可恢复）。确定删除阶段「" + esc(st.name) + "」吗？"
+      : "确定删除阶段「" + esc(st.name) + "」吗？删除后数据保留可恢复。";
+    UI.confirm({ title: "删除阶段", html: msg, okText: "删除", danger: true }).then(function (ok) {
+      if (!ok) return;
+      s.stages.splice(s.stages.indexOf(st), 1);
+      s.stages.forEach(function (x, k) { x.sort = k + 1; });
+      UI.toast("已删除阶段「" + st.name + "」");
+      render();
+    });
+  }
+
+  function toggleStage(sid, stid, wantEnable, cb) {
+    var s = findSubject(sid);
+    var st = s && findStage(s, stid);
+    if (!st) { cb(false); return; }
+    UI.confirm({
+      title: wantEnable ? "启用阶段" : "禁用阶段",
+      text: "确定要" + (wantEnable ? "启用" : "禁用") + "阶段「" + st.name + "」吗？" + (wantEnable ? "" : "禁用后该阶段在学员端不再展示。"),
+      okText: wantEnable ? "启用" : "禁用",
+      danger: !wantEnable
+    }).then(function (ok) {
+      if (ok) {
+        st.enabled = wantEnable;
+        UI.toast("阶段「" + st.name + "」已" + (wantEnable ? "启用" : "禁用"));
+        render();
+      }
+      cb(ok);
+    });
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  document.getElementById("add-subject-btn").addEventListener("click", function () { openSubjectModal(null); });
+  document.getElementById("subject-save-btn").addEventListener("click", saveSubject);
+  document.getElementById("stage-save-btn").addEventListener("click", saveStage);
+  document.getElementById("sf-colors").addEventListener("click", function (e) {
+    var dot = e.target.closest(".color-dot");
+    if (!dot) return;
+    sf.color = dot.dataset.color;
+    renderColorDots();
+  });
+
+  var grid = document.getElementById("subject-grid");
+  grid.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn || btn.disabled) return;
+    var act = btn.dataset.act;
+    var card = btn.closest("[data-sid]");
+    var sid = card ? card.dataset.sid : null;
+    var row = btn.closest("[data-stid]");
+    var stid = row ? row.dataset.stid : null;
+
+    if (act === "sub-up" || act === "sub-down") {
+      var s = findSubject(sid);
+      if (s && move(subjects, s, act === "sub-up" ? -1 : 1)) {
+        UI.toast("已" + (act === "sub-up" ? "上移" : "下移") + "学科「" + s.name + "」");
+        render();
+      }
+    } else if (act === "sub-edit") {
+      openSubjectModal(sid);
+    } else if (act === "sub-del") {
+      deleteSubject(sid);
+    } else if (act === "stage-add") {
+      openStageModal(sid, null);
+    } else if (act === "st-up" || act === "st-down") {
+      var s2 = findSubject(sid), st = s2 && findStage(s2, stid);
+      if (st && move(s2.stages, st, act === "st-up" ? -1 : 1)) {
+        UI.toast("已" + (act === "st-up" ? "上移" : "下移") + "阶段「" + st.name + "」");
+        render();
+      }
+    } else if (act === "st-edit") {
+      openStageModal(sid, stid);
+    } else if (act === "st-del") {
+      deleteStage(sid, stid);
+    }
+  });
+
+  grid.addEventListener("change", function (e) {
+    var cb = e.target.closest('input[data-act="st-toggle"]');
+    if (!cb) return;
+    var row = cb.closest("[data-stid]");
+    var card = cb.closest("[data-sid]");
+    var want = cb.checked;
+    toggleStage(card.dataset.sid, row.dataset.stid, want, function (applied) {
+      if (!applied) cb.checked = !want;
+    });
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

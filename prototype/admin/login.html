@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>后台登录 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  body.login-body { background: #101828; }
+  .login-page {
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #101828 0%, #1b2a4e 55%, #2a4b8d 100%); padding: 24px 16px;
+  }
+  .login-card { width: 380px; max-width: 100%; }
+  .login-head { text-align: center; padding: 28px 24px 4px; }
+  .login-logo {
+    width: 52px; height: 52px; border-radius: 14px; background: var(--brand-grad); color: #fff;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .login-title { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
+  .login-sub { font-size: 12px; color: var(--ink-3); margin: 0; }
+  .login-body-wrap { padding: 18px 24px 4px; }
+  .login-foot { padding: 14px 24px 24px; text-align: center; }
+  .lock-hint { font-size: 12px; color: var(--ink-3); text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body class="login-body">
+<div class="login-page">
+  <div class="card login-card">
+    <div class="login-head">
+      <div class="login-logo">云</div>
+      <h1 class="login-title">云枢智学 · 管理后台</h1>
+      <p class="login-sub">AI 赋能的智能面试训练平台 · 管理端</p>
+    </div>
+    <div class="login-body-wrap">
+      <div class="alert alert-error hidden" id="login-alert"></div>
+      <form id="login-form" autocomplete="off">
+        <div class="field">
+          <label class="field-label" for="login-account">管理员账号<span class="req">*</span></label>
+          <input class="input" id="login-account" placeholder="请输入管理员账号">
+        </div>
+        <div class="field">
+          <label class="field-label" for="login-pwd">登录密码<span class="req">*</span></label>
+          <input class="input" id="login-pwd" type="password" placeholder="请输入登录密码">
+        </div>
+        <div class="flex-between" style="margin: 2px 0 18px">
+          <label class="checkbox-row"><input type="checkbox" id="login-remember" checked>记住登录状态</label>
+          <button type="button" class="btn-link" id="forgot-btn">忘记密码？</button>
+        </div>
+        <button class="btn btn-primary btn-lg btn-block" id="login-btn" type="submit">登录</button>
+      </form>
+      <div class="lock-hint hidden" id="lock-hint">原型演示：刷新页面恢复</div>
+    </div>
+    <div class="login-foot">
+      <a href="../portal/index.html" id="back-portal">← 返回学员前台</a>
+      <div class="muted" style="font-size: 12px; margin-top: 10px">原型演示：任意账号密码均可登录</div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var form = document.getElementById("login-form");
+  var alertEl = document.getElementById("login-alert");
+  var accEl = document.getElementById("login-account");
+  var pwdEl = document.getElementById("login-pwd");
+  var btn = document.getElementById("login-btn");
+  var lockHint = document.getElementById("lock-hint");
+
+  var failCount = 0;   // 连续失败计数（原型：校验失败也计入，便于演示锁定）
+  var locked = false;
+
+  function showAlert(msg) {
+    alertEl.textContent = msg;
+    alertEl.classList.remove("hidden");
+  }
+  function clearAlert() {
+    alertEl.classList.add("hidden");
+    alertEl.textContent = "";
+    accEl.classList.remove("error");
+    pwdEl.classList.remove("error");
+  }
+
+  // 失败处理：连续 5 次错误 → 锁定 5 分钟（原型：禁用按钮，刷新页面恢复）
+  function fail(msg) {
+    failCount += 1;
+    if (failCount >= 5) {
+      locked = true;
+      showAlert("账号已锁定，请 5 分钟后重试");
+      btn.disabled = true;
+      lockHint.classList.remove("hidden");
+    } else {
+      showAlert(msg);
+    }
+  }
+
+  accEl.addEventListener("input", clearAlert);
+  pwdEl.addEventListener("input", clearAlert);
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (locked) return;
+    var acc = accEl.value.trim();
+    var pwd = pwdEl.value;
+
+    // 校验顺序：账号非空 → 密码非空 → 登录比对
+    if (!acc) {
+      accEl.classList.add("error");
+      accEl.focus();
+      fail("请输入管理员账号");
+      return;
+    }
+    if (!pwd) {
+      pwdEl.classList.add("error");
+      pwdEl.focus();
+      fail("请输入登录密码");
+      return;
+    }
+    // 原型模拟：账号密码均非空即登录成功
+    try {
+      localStorage.setItem("yzsx_admin", JSON.stringify(DB.admin));
+      localStorage.setItem("yszx_admin", JSON.stringify(DB.admin));
+    } catch (x) {}
+    try { localStorage.removeItem("yszx_admin_out"); } catch (x) {}
+
+    UI.toast("登录成功");
+    btn.disabled = true;
+    setTimeout(function () {
+      location.href = "dashboard.html";
+    }, 420);
+  });
+
+  document.getElementById("forgot-btn").addEventListener("click", function () {
+    UI.toast("请联系超级管理员重置密码", "warn");
+  });
+})();
+</script>
+</body>
+</html>

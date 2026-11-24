@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云枢智学 · B站课程库</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  .stat-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+  .cover-emoji {
+    width: 40px; height: 40px; border-radius: 8px; display: inline-flex; align-items: center;
+    justify-content: center; font-size: 20px; background: var(--brand-light);
+  }
+  .subject-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+  @media (max-width: 900px) {
+    .stat-grid-3 { grid-template-columns: 1fr; }
+    .subject-checks { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body class="admin-body" data-page="courses">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <!-- 统计卡片 -->
+      <div class="stat-grid-3" id="stat-grid"></div>
+
+      <!-- 筛选 -->
+      <div class="filter-bar">
+        <input class="input search-input" id="f-q" placeholder="搜索课程标题">
+        <select class="select" id="f-subject"></select>
+        <select class="select" id="f-source">
+          <option value="">全部来源</option>
+          <option value="B站">B站</option>
+          <option value="其他">其他</option>
+        </select>
+      </div>
+
+      <!-- 工具行 -->
+      <div class="toolbar-row">
+        <button class="btn btn-primary" id="add-course-btn">+ 新增课程</button>
+        <button class="btn" id="import-btn">批量导入</button>
+        <div class="toolbar-right">
+          <button class="btn" id="export-btn">导出 Excel</button>
+        </div>
+      </div>
+
+      <!-- 表格 -->
+      <div class="card">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>封面</th>
+                <th>课程名称</th>
+                <th>BV号</th>
+                <th>时长</th>
+                <th>学科</th>
+                <th>来源</th>
+                <th class="cell-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody id="course-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pager"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- 新增 / 编辑课程弹窗 -->
+<div class="modal-overlay" id="course-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3 id="course-modal-title">新增课程</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">课程名称<span class="req">*</span></label>
+        <input class="input" id="cf-title" placeholder="请输入课程名称">
+        <div class="field-error" id="cf-title-err"></div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label">BV号</label>
+          <input class="input" id="cf-bv" placeholder="选填，如 BV1xK4y1E7qA">
+          <div class="field-hint">选填，全库唯一；重复保存会报错</div>
+          <div class="field-error" id="cf-bv-err"></div>
+        </div>
+        <div class="field">
+          <label class="field-label">时长<span class="req">*</span></label>
+          <input class="input" id="cf-duration" placeholder="格式 小时:分钟，如 6:30">
+          <div class="field-hint">必填，格式「小时:分钟」，如 6:30</div>
+          <div class="field-error" id="cf-duration-err"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label">封面图片 URL</label>
+        <input class="input" id="cf-cover" placeholder="https://…（选填）">
+      </div>
+      <div class="field">
+        <label class="field-label">所属学科<span class="req">*</span></label>
+        <div class="subject-checks" id="cf-subjects"></div>
+        <div class="field-hint">可多选：按勾选顺序第一个为主学科，其余为关联学科；「其他学科」为兜底项，需单独勾选、不可与其他学科同时选中</div>
+        <div class="field-error" id="cf-subjects-err"></div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label">来源<span class="req">*</span></label>
+          <label class="radio-row"><input type="radio" name="cf-source" value="B站" checked><span>B站</span></label>
+          <label class="radio-row" style="margin-top:6px"><input type="radio" name="cf-source" value="其他"><span>其他</span></label>
+        </div>
+        <div class="field">
+          <label class="field-label">课程链接</label>
+          <input class="input" id="cf-url" placeholder="https://www.bilibili.com/…（选填）">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>取消</button>
+      <button class="btn btn-primary" id="course-save-btn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批量导入弹窗 -->
+<div class="modal-overlay" id="import-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>批量导入课程</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="import-drop" id="import-drop">
+        <div style="font-size:34px">📄</div>
+        <div style="margin:8px 0">将 Excel 文件拖拽到此处，或
+          <label for="import-file" style="color:var(--brand);cursor:pointer;text-decoration:underline">选择文件</label>
+        </div>
+        <div style="font-size:12px">支持 .xlsx / .xls，单次 ≤ 2000 行、≤ 5MB</div>
+        <input type="file" id="import-file" class="hidden" accept=".xlsx,.xls">
+      </div>
+      <div class="flex-between mt-16">
+        <div class="muted" id="import-file-name">尚未选择文件</div>
+        <button class="btn btn-sm" id="download-tpl-btn">下载导入模板</button>
+      </div>
+      <div class="import-note mt-16">
+        <b>导入说明</b><br>
+        1. 表头按<b>列名识别</b>，列顺序可变；必需列「课程名称」「时长（分钟）」缺一即整份文件报错。<br>
+        2. 可选列：所属学科、来源、BV号、封面、播放链接；单次 ≤ 2000 行、文件 ≤ 5MB。<br>
+        3. 「所属学科」一格内可写多个学科（中英文逗号分隔），<b>第一个为主学科，其余为关联学科</b>；不属于任何已有学科的课程归入「其他学科」。<br>
+        4. <b>Excel 为权威数据源</b>：BV号与库中已有课程重复时<b>覆盖更新</b>该课程；无 BV号时按「课程名称 + 来源」匹配；为空的可选列按空值写入（所属学科为空 → 归入「其他学科」），不保留库中原值；关联学科整体替换。<br>
+        5. 列中学科名无法识别的行视为<b>警告行</b>，归入「其他学科」导入。<br>
+        6. 任一无效行（课程名称缺失、时长非数字等）即<b>整份拒绝导入</b>，报出行号与原因，一行数据都不写入，修正后重新上传。
+      </div>
+      <div id="import-preview" class="mt-16" hidden></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>取消</button>
+      <button class="btn btn-primary" id="import-confirm-btn" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+  var esc = UI.esc;
+
+  /* ---------- 内存数据（拷贝自 DB，页面会话内增删改真实生效） ---------- */
+  var courses = JSON.parse(JSON.stringify(DB.courses));
+  var subjects = DB.subjects;
+  var routes = DB.routes;
+
+  var filters = { q: "", subject: "", source: "" };
+  var page = 1, pageSize = 10;
+
+  /* ---------- 工具 ---------- */
+  function tint(hex, a) {
+    hex = String(hex || "#2a78d6").replace("#", "");
+    if (hex.length === 3) hex = hex.replace(/./g, function (ch) { return ch + ch; });
+    var r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  }
+  function subjectById(id) {
+    for (var i = 0; i < subjects.length; i++) if (subjects[i].id === id) return subjects[i];
+    return null;
+  }
+  function courseById(id) {
+    for (var i = 0; i < courses.length; i++) if (courses[i].id === id) return courses[i];
+    return null;
+  }
+  function fmtHM(min) {
+    var h = Math.floor(min / 60), m = min % 60;
+    return h + ":" + (m < 10 ? "0" + m : m);
+  }
+  function parseDuration(str) {
+    var m = /^(\d{1,3}):([0-5]?\d)$/.exec(String(str || "").trim());
+    if (!m) return null;
+    var h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+    return { text: h + ":" + (min < 10 ? "0" + min : min), min: h * 60 + min };
+  }
+  function setErr(inputSel, errSel, msg) {
+    var inp = document.querySelector(inputSel);
+    if (inp) inp.classList.add("error");
+    var err = document.querySelector(errSel);
+    if (err) err.textContent = msg;
+  }
+  function clearErrs(scope) {
+    UI.$$(".error", scope).forEach(function (el) { el.classList.remove("error"); });
+    UI.$$(".field-error", scope).forEach(function (el) { el.textContent = ""; });
+  }
+  function statCard(label, value, sub, icon) {
+    return '<div class="card stat-card"><div class="stat-top"><div class="stat-label">' + label +
+      '</div><div class="stat-icon">' + icon + '</div></div><div class="stat-value">' + value +
+      '</div><div class="stat-sub">' + (sub || "") + "</div></div>";
+  }
+
+  /* ---------- 筛选与统计 ---------- */
+  function filtered() {
+    var q = filters.q.trim().toLowerCase();
+    return courses.filter(function (c) {
+      if (q && c.title.toLowerCase().indexOf(q) < 0) return false;
+      if (filters.subject && c.subjectIds.indexOf(filters.subject) < 0) return false;
+      if (filters.source && c.source !== filters.source) return false;
+      return true;
+    });
+  }
+
+  function renderStats() {
+    var totalMin = courses.reduce(function (a, c) { return a + (c.durationMin || 0); }, 0);
+    var subSet = {};
+    courses.forEach(function (c) {
+      c.subjectIds.forEach(function (id) { if (id !== "sub-9") subSet[id] = 1; });
+    });
+    document.getElementById("stat-grid").innerHTML =
+      statCard("课程总数", courses.length, "课程库在库课程", "🎬") +
+      statCard("总时长", (totalMin / 60).toFixed(1), "小时（全部课程合计）", "⏱️") +
+      statCard("关联学科数", Object.keys(subSet).length, "不含「其他学科」", "📚");
+  }
+
+  /* ---------- 表格 ---------- */
+  function subjectCell(c) {
+    if (!c.subjectIds.length) return '<span class="muted">—</span>';
+    var main = subjectById(c.subjectIds[0]);
+    var h = '<span class="badge badge-blue">' + esc(main ? main.name : c.subjectIds[0]) + "</span>";
+    if (c.subjectIds.length > 1) h += ' <span class="badge">+' + (c.subjectIds.length - 1) + " 关联</span>";
+    return h;
+  }
+
+  function renderTable() {
+    var list = filtered();
+    var pages = Math.max(1, Math.ceil(list.length / pageSize));
+    if (page > pages) page = pages;
+    var rows = list.slice((page - 1) * pageSize, page * pageSize);
+    var tbody = document.getElementById("course-tbody");
+
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state">' +
+        '<div class="empty-icon">🎬</div><div class="empty-title">暂无匹配的课程，试试调整筛选条件</div></div></td></tr>';
+    } else {
+      tbody.innerHTML = rows.map(function (c, i) {
+        var main = subjectById(c.subjectIds[0]);
+        return "<tr>" +
+          "<td>" + ((page - 1) * pageSize + i + 1) + "</td>" +
+          '<td><span class="cover-emoji" style="background:' + tint(main ? main.color : "#898781", 0.16) + '">' + esc(c.cover || "📚") + "</span></td>" +
+          '<td style="max-width:280px"><div class="nowrap" style="overflow:hidden;text-overflow:ellipsis" title="' + esc(c.title) + '">' + esc(c.title) + "</div></td>" +
+          '<td class="muted nowrap">' + esc(c.bv || "—") + "</td>" +
+          "<td class=\"nowrap\">" + esc(c.duration) + "</td>" +
+          "<td>" + subjectCell(c) + "</td>" +
+          '<td><span class="badge ' + (c.source === "B站" ? "badge-blue" : "badge-gray") + '">' + esc(c.source) + "</span></td>" +
+          '<td class="cell-actions">' +
+            '<button class="btn-link" data-act="edit" data-id="' + c.id + '">编辑</button>' +
+            '<button class="btn-link danger" data-act="del" data-id="' + c.id + '">删除</button>' +
+          "</td></tr>";
+      }).join("");
+    }
+    UI.pager(document.getElementById("pager"), {
+      total: list.length, page: page, pageSize: pageSize,
+      onChange: function (n) { page = n; renderTable(); }
+    });
+    renderStats();
+  }
+
+  /* ---------- 新增 / 编辑 ---------- */
+  var cf = { id: null, order: [] };
+
+  function renderSubjectChecks() {
+    var otherPicked = cf.order.indexOf("sub-9") >= 0;
+    document.getElementById("cf-subjects").innerHTML = subjects.map(function (s) {
+      var checked = cf.order.indexOf(s.id) >= 0;
+      var isOther = s.id === "sub-9";
+      var disabled = otherPicked && !isOther;
+      var isMain = cf.order[0] === s.id;
+      return '<label class="checkbox-row">' +
+        '<input type="checkbox" data-sid="' + s.id + '"' + (checked ? " checked" : "") + (disabled ? " disabled" : "") + ">" +
+        "<span>" + esc(s.icon) + " " + esc(s.name) + "</span>" +
+        (isMain ? '<span class="badge badge-blue">主</span>' : "") +
+      "</label>";
+    }).join("");
+  }
+
+  function openCourseModal(id) {
+    var c = id ? courseById(id) : null;
+    cf.id = c ? c.id : null;
+    cf.order = c ? c.subjectIds.slice() : [];
+    document.getElementById("course-modal-title").textContent = c ? "编辑课程" : "新增课程";
+    document.getElementById("cf-title").value = c ? c.title : "";
+    document.getElementById("cf-bv").value = c ? (c.bv || "") : "";
+    document.getElementById("cf-duration").value = c ? c.duration : "";
+    document.getElementById("cf-cover").value = c ? (c.coverUrl || "") : "";
+    document.getElementById("cf-url").value = c ? (c.url || "") : "";
+    UI.$$('input[name="cf-source"]').forEach(function (r) {
+      r.checked = (c ? c.source : "B站") === r.value;
+    });
+    renderSubjectChecks();
+    clearErrs(document.getElementById("course-modal"));
+    UI.openModal("course-modal");
+    document.getElementById("cf-title").focus();
+  }
+
+  function saveCourse() {
+    var title = document.getElementById("cf-title").value.trim();
+    var bv = document.getElementById("cf-bv").value.trim();
+    var durStr = document.getElementById("cf-duration").value.trim();
+    var coverUrl = document.getElementById("cf-cover").value.trim();
+    var url = document.getElementById("cf-url").value.trim();
+    var sourceEl = document.querySelector('input[name="cf-source"]:checked');
+    var source = sourceEl ? sourceEl.value : "B站";
+    var dur = parseDuration(durStr);
+
+    clearErrs(document.getElementById("course-modal"));
+    var ok = true;
+    if (!title) { setErr("#cf-title", "#cf-title-err", "请输入课程名称"); ok = false; }
+    if (!dur) { setErr("#cf-duration", "#cf-duration-err", "时长格式应为「小时:分钟」，如 6:30"); ok = false; }
+    if (bv && courses.some(function (c) { return c.bv && c.bv === bv && c.id !== cf.id; })) {
+      setErr("#cf-bv", "#cf-bv-err", "BV号已存在，请勿重复"); ok = false;
+    }
+    if (!cf.order.length) {
+      document.getElementById("cf-subjects-err").textContent = "请至少勾选一个所属学科";
+      ok = false;
+    }
+    if (!ok) { UI.toast("请修正表单中的错误", "warn"); return; }
+
+    var isNew = !cf.id;
+    var c = isNew ? { id: "c-" + Date.now(), cover: "📚" } : courseById(cf.id);
+    c.title = title;
+    c.bv = bv;
+    c.duration = dur.text;
+    c.durationMin = dur.min;
+    c.subjectIds = cf.order.slice();
+    c.source = source;
+    c.url = url;
+    c.coverUrl = coverUrl;
+    if (isNew) {
+      var main = subjectById(cf.order[0]);
+      c.cover = main ? main.icon : "📚";
+      courses.push(c);
+    }
+    UI.closeModal("course-modal");
+    UI.toast(isNew ? "新增课程「" + title + "」成功" : "课程「" + title + "」已保存");
+    renderTable();
+  }
+
+  function deleteCourse(id) {
+    var c = courseById(id);
+    if (!c) return;
+    var refs = routes.filter(function (r) { return r.courseIds.indexOf(c.id) >= 0; }).length;
+    var msg = refs > 0
+      ? "该课程已被 " + refs + " 条学习路线引用，删除后（逻辑删除，数据保留可恢复）路线中将不可见。确定删除课程「" + esc(c.title) + "」吗？"
+      : "确定删除课程「" + esc(c.title) + "」吗？删除后数据保留可恢复。";
+    UI.confirm({ title: "删除课程", html: msg, okText: "删除", danger: true }).then(function (ok) {
+      if (!ok) return;
+      courses.splice(courses.indexOf(c), 1);
+      UI.toast("已删除课程「" + c.title + "」");
+      renderTable();
+    });
+  }
+
+  /* ---------- 批量导入（原型模拟解析） ---------- */
+  var IMPORT_ROWS = [
+    { title: "Python 数据分析实战：Pandas 从入门到精通", duration: "3:20", durationMin: 200,
+      subjectIds: ["sub-1"], subjectText: "AI应用与智能体开发", source: "B站", bv: "BV1py8y2d1aA", cover: "🐍", url: "https://www.bilibili.com/", result: "新增" },
+    { title: "大模型应用开发实战：从 Prompt 到 Agent", duration: "6:30", durationMin: 390,
+      subjectIds: ["sub-1"], subjectText: "AI应用与智能体开发", source: "B站", bv: "BV1xK4y1E7qA", cover: "🤖", url: "https://www.bilibili.com/", result: "覆盖更新", matchId: "c-1" },
+    { title: "大模型推理加速：vLLM 部署实践（更新版）", duration: "2:40", durationMin: 160,
+      subjectIds: ["sub-2", "sub-1"], subjectText: "AI大模型开发、AI应用与智能体开发", source: "B站", bv: "BV1gF4y1e7qS", cover: "⚡", url: "https://www.bilibili.com/", result: "覆盖更新", matchId: "c-14" },
+    { title: "Kubernetes 故障排查实战", duration: "2:10", durationMin: 130,
+      subjectIds: ["sub-6"], subjectText: "AI运维", source: "B站", bv: "BV1k8s5t2uQq", cover: "☸️", url: "https://www.bilibili.com/", result: "新增" },
+    { title: "Web3 入门：智能合约基础", duration: "1:50", durationMin: 110,
+      subjectIds: ["sub-9"], subjectText: "区块链开发 → 其他学科", source: "其他", bv: "", cover: "⛓️", url: "", result: "警告" },
+    { title: "深度学习入门：神经网络基础", duration: "8:00", durationMin: 480,
+      subjectIds: ["sub-2"], subjectText: "AI大模型开发", source: "B站", bv: "BV1aT411N7mV", cover: "🧬", url: "https://www.bilibili.com/", result: "覆盖更新", matchId: "c-3" },
+    { title: "AI 面试通关：高频考点串讲", duration: "2:30", durationMin: 150,
+      subjectIds: ["sub-5"], subjectText: "AI测试", source: "其他", bv: "", cover: "🎯", url: "", result: "新增" },
+    { title: "Stable Diffusion 进阶：ControlNet 实战", duration: "3:05", durationMin: 185,
+      subjectIds: ["sub-7"], subjectText: "AI视觉设计", source: "B站", bv: "BV1cn3x8v6jK", cover: "🖼️", url: "https://www.bilibili.com/", result: "新增" }
+  ];
+
+  function resultBadge(r) {
+    var cls = r === "新增" ? "badge-green" : (r === "覆盖更新" ? "badge-blue" : "badge-orange");
+    return '<span class="badge ' + cls + '">' + r + "</span>";
+  }
+
+  function showImportPreview(fileName) {
+    var addN = 0, upN = 0, warnN = 0;
+    var updatedIds = [];
+    IMPORT_ROWS.forEach(function (r) {
+      if (r.result === "新增") addN++;
+      else if (r.result === "覆盖更新") { upN++; if (r.matchId) updatedIds.push(r.matchId); }
+      else warnN++;
+    });
+    var refCourses = 0, refRoutes = 0;
+    updatedIds.forEach(function (cid) {
+      var rs = routes.filter(function (r) { return r.courseIds.indexOf(cid) >= 0; });
+      if (rs.length) { refCourses++; refRoutes += rs.length; }
+    });
+
+    var html =
+      '<div class="alert alert-info" style="margin-bottom:12px">解析完成（原型模拟）：' +
+        esc(fileName || "示例文件.xlsx") + "</div>" +
+      '<div class="flex-between" style="flex-wrap:wrap;gap:8px">' +
+        "<div><b>共 " + IMPORT_ROWS.length + " 行：新增 " + addN + " / 覆盖更新 " + upN + " / 警告 " + warnN + "</b></div>" +
+        (refCourses > 0 ? '<div class="badge badge-orange">其中 ' + refCourses + " 门课程已被 " + refRoutes + " 条学习路线引用</div>" : "") +
+      "</div>" +
+      '<div class="table-wrap mt-16"><table class="table"><thead><tr>' +
+        "<th>课程名称</th><th>时长</th><th>所属学科</th><th>来源</th><th>BV号</th><th>结果</th>" +
+      "</tr></thead><tbody>" +
+      IMPORT_ROWS.map(function (r) {
+        return "<tr><td>" + esc(r.title) + "</td><td class=\"nowrap\">" + esc(r.duration) + "</td><td>" + esc(r.subjectText) +
+          '</td><td class="nowrap">' + esc(r.source) + '</td><td class="muted nowrap">' + esc(r.bv || "—") +
+          "</td><td>" + resultBadge(r.result) + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div>";
+
+    var host = document.getElementById("import-preview");
+    host.innerHTML = html;
+    host.hidden = false;
+    document.getElementById("import-confirm-btn").disabled = false;
+  }
+
+  function applyImport() {
+    var addN = 0, upN = 0;
+    var batch = [];
+    IMPORT_ROWS.forEach(function (r) {
+      if (r.result === "覆盖更新" && r.matchId) {
+        var c = courseById(r.matchId);
+        if (c) {
+          c.title = r.title; c.duration = r.duration; c.durationMin = r.durationMin;
+          c.subjectIds = r.subjectIds.slice(); c.source = r.source;
+          c.bv = r.bv; c.cover = r.cover; c.url = r.url;
+          upN++;
+          batch.push(c);
+          return;
+        }
+      }
+      var nc = {
+        id: "c-i" + Date.now() + "-" + batch.length,
+        title: r.title, bv: r.bv, duration: r.duration, durationMin: r.durationMin,
+        subjectIds: r.subjectIds.slice(), source: r.source, cover: r.cover, url: r.url
+      };
+      courses.push(nc);
+      batch.push(nc);
+      addN++;
+    });
+    /* 列表顺序：本批导入按 Excel 行序置顶，其余课程保持原相对顺序排在其后 */
+    var rest = courses.filter(function (c) { return batch.indexOf(c) < 0; });
+    courses.length = 0;
+    batch.forEach(function (c) { courses.push(c); });
+    rest.forEach(function (c) { courses.push(c); });
+
+    UI.closeModal("import-modal");
+    UI.toast("导入成功：新增 " + addN + " 门、更新 " + upN + " 门");
+    page = 1;
+    renderTable();
+    resetImportModal();
+  }
+
+  function resetImportModal() {
+    document.getElementById("import-preview").hidden = true;
+    document.getElementById("import-preview").innerHTML = "";
+    document.getElementById("import-confirm-btn").disabled = true;
+    document.getElementById("import-file-name").textContent = "尚未选择文件";
+    document.getElementById("import-file").value = "";
+  }
+
+  function downloadTemplate() {
+    var rows = [
+      ["课程名称", "时长（分钟）", "所属学科", "来源", "BV号", "封面", "播放链接"],
+      ["大模型应用开发实战：从 Prompt 到 Agent", "390", "AI应用与智能体开发,AI大模型开发", "B站", "BV1xK4y1E7qA", "🤖", "https://www.bilibili.com/"],
+      ["面试高频算法题精讲（内部资料）", "90", "其他学科", "其他", "", "📘", ""]
+    ];
+    var csv = rows.map(function (r) {
+      return r.map(function (c) {
+        c = String(c);
+        return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+      }).join(",");
+    }).join("\r\n");
+    /* 带 BOM，Excel 打开 CSV 中文不乱码 */
+    var blob = new Blob([String.fromCharCode(0xFEFF) + csv], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "B站课程库-导入模板.csv";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    UI.toast("导入模板已下载");
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  /* 学科筛选下拉 */
+  document.getElementById("f-subject").innerHTML =
+    '<option value="">全部学科</option>' +
+    subjects.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + "</option>"; }).join("");
+
+  document.getElementById("f-q").addEventListener("input", UI.debounce(function () {
+    filters.q = this.value;
+    page = 1;
+    renderTable();
+  }, 300));
+  document.getElementById("f-subject").addEventListener("change", function () {
+    filters.subject = this.value; page = 1; renderTable();
+  });
+  document.getElementById("f-source").addEventListener("change", function () {
+    filters.source = this.value; page = 1; renderTable();
+  });
+
+  document.getElementById("add-course-btn").addEventListener("click", function () { openCourseModal(null); });
+  document.getElementById("course-save-btn").addEventListener("click", saveCourse);
+  document.getElementById("export-btn").addEventListener("click", function () {
+    UI.toast("已按当前筛选导出 Excel（原型模拟）");
+  });
+
+  document.getElementById("cf-subjects").addEventListener("change", function (e) {
+    var cb = e.target.closest("input[data-sid]");
+    if (!cb) return;
+    var id = cb.dataset.sid;
+    if (id === "sub-9") {
+      cf.order = cb.checked ? ["sub-9"] : [];
+    } else if (cb.checked) {
+      if (cf.order.indexOf(id) < 0) cf.order.push(id);
+    } else {
+      cf.order = cf.order.filter(function (x) { return x !== id; });
+    }
+    renderSubjectChecks();
+  });
+
+  document.getElementById("course-tbody").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    if (btn.dataset.act === "edit") openCourseModal(btn.dataset.id);
+    else if (btn.dataset.act === "del") deleteCourse(btn.dataset.id);
+  });
+
+  /* 批量导入 */
+  document.getElementById("import-btn").addEventListener("click", function () {
+    resetImportModal();
+    UI.openModal("import-modal");
+  });
+  document.getElementById("import-drop").addEventListener("click", function (e) {
+    if (e.target.closest("label")) return;
+    document.getElementById("import-file").click();
+  });
+  ["dragenter", "dragover"].forEach(function (ev) {
+    document.getElementById("import-drop").addEventListener(ev, function (e) {
+      e.preventDefault();
+      this.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    document.getElementById("import-drop").addEventListener(ev, function (e) {
+      e.preventDefault();
+      this.classList.remove("dragover");
+    });
+  });
+  document.getElementById("import-drop").addEventListener("drop", function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    document.getElementById("import-file-name").textContent = "已选择文件：" + (f ? f.name : "（未知文件）") + "（原型模拟解析）";
+    showImportPreview(f ? f.name : "");
+  });
+  document.getElementById("import-file").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    document.getElementById("import-file-name").textContent = "已选择文件：" + (f ? f.name : "（未知文件）") + "（原型模拟解析）";
+    showImportPreview(f ? f.name : "");
+  });
+  document.getElementById("import-confirm-btn").addEventListener("click", function () {
+    UI.confirm({ title: "确认导入", text: "Excel 为权威数据源：BV 号重复的课程将被覆盖更新，为空的可选列按空值写入。确定导入吗？", okText: "确认导入" })
+      .then(function (ok) { if (ok) applyImport(); });
+  });
+  document.getElementById("download-tpl-btn").addEventListener("click", downloadTemplate);
+
+  renderTable();
+})();
+</script>
+</body>
+</html>

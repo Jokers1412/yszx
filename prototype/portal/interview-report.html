@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 模拟面试报告 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  .report-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .report-head h1 { margin-bottom: 4px; }
+  .report-head .rh-meta { color: var(--ink-3); font-size: 13px; }
+  .score-zone { display: flex; gap: 32px; align-items: center; flex-wrap: wrap; padding: 28px 24px; }
+  .ring-num-txt { font-size: 38px; font-weight: 700; line-height: 1; }
+  .ring-sub { font-size: 12px; color: var(--ink-3); }
+  .score-detail { display: flex; flex-direction: column; gap: 14px; min-width: 240px; }
+  .sd-item .sd-label { font-size: 12px; color: var(--ink-3); }
+  .sd-item .sd-value { font-size: 22px; font-weight: 700; }
+  .trend-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .trend-up { background: var(--success-bg); color: var(--success-text); }
+  .trend-down { background: var(--danger-bg); color: var(--danger-text); }
+  .trend-flat { background: var(--warning-bg); color: var(--warning-text); }
+  .pb-warn { background: var(--warning) !important; }
+  .pb-danger { background: var(--danger) !important; }
+  .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pc-item { display: flex; gap: 8px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .pc-item:last-child { border-bottom: none; }
+  .pc-item .pc-icon { flex-shrink: 0; }
+  .pc-good .pc-icon { color: var(--success-text); }
+  .pc-bad .pc-icon { color: var(--warning-text); }
+  .pc-tip { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+  .suggest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .report-actions { display: flex; justify-content: center; gap: 12px; margin: 28px 0 8px; flex-wrap: wrap; }
+  .replay-list { max-height: 52vh; overflow-y: auto; }
+  .replay-item { padding: 12px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .replay-item:last-child { border-bottom: none; }
+  .replay-item .rp-q { font-weight: 600; margin-bottom: 4px; }
+  .replay-item .rp-a { color: var(--ink-2); margin-bottom: 4px; }
+  .replay-item .rp-fb { color: var(--ink-3); }
+  @media (max-width: 900px) {
+    .pros-cons, .suggest-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body data-page="interview-report">
+<header id="site-header"></header>
+<div class="container" style="padding:24px 24px 64px">
+
+  <div class="report-head">
+    <div>
+      <h1>AI 模拟面试报告</h1>
+      <div class="rh-meta" id="report-meta">AI应用与智能体开发 · 中等 · 面试时间 2026-11-19 21:30</div>
+    </div>
+    <a class="btn btn-ghost" href="interview-records.html">🎙️ 面试记录</a>
+  </div>
+
+  <div class="card mb-16">
+    <div class="score-zone">
+      <div class="report-score-ring">
+        <svg viewBox="0 0 168 168" width="168" height="168">
+          <circle cx="84" cy="84" r="70" fill="none" stroke="var(--line)" stroke-width="12"></circle>
+          <circle id="ring-fg" cx="84" cy="84" r="70" fill="none" stroke="var(--success)" stroke-width="12"
+            stroke-linecap="round" transform="rotate(-90 84 84)" style="transition: stroke-dasharray .9s ease"></circle>
+        </svg>
+        <div class="ring-value">
+          <div class="ring-num-txt" id="ring-num">0</div>
+          <div class="ring-sub">综合评分 / 100</div>
+        </div>
+      </div>
+      <div class="score-detail">
+        <div class="sd-item"><div class="sd-label">回答准确度</div><div class="sd-value" id="sd-accuracy">0%</div></div>
+        <div class="sd-item"><div class="sd-label">面试时长</div><div class="sd-value" id="sd-duration">0 分 0 秒</div></div>
+        <div class="sd-item"><div class="sd-label">答题数量</div><div class="sd-value" id="sd-count">0 题</div></div>
+        <div id="trend-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-16">
+    <div class="card-header"><h3>能力分析</h3><span class="muted">六维能力评估（0-10 分）</span></div>
+    <div class="card-body"><div class="dim-grid" id="dim-grid"></div></div>
+  </div>
+
+  <div class="pros-cons mb-16">
+    <div class="card">
+      <div class="card-header"><h3>优点</h3><span class="badge badge-green">表现较好</span></div>
+      <div class="card-body" id="pros-list"></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>待提升</h3><span class="badge badge-orange">重点改进</span></div>
+      <div class="card-body" id="cons-list"></div>
+    </div>
+  </div>
+
+  <div class="card mb-16">
+    <div class="card-header"><h3>改进建议</h3></div>
+    <div class="card-body">
+      <ol class="advice-list" id="advice-list"></ol>
+    </div>
+  </div>
+
+  <div class="card mb-16">
+    <div class="card-header"><h3>能力提升建议</h3></div>
+    <div class="card-body">
+      <div class="suggest-grid">
+        <div class="suggest-card">
+          <div class="sg-icon">📚</div>
+          <h3>推荐题目</h3>
+          <p class="text-2 mb-0">针对薄弱知识点刷专项题，把每次错题沉淀进错题本，连续答对 3 次即可标记已掌握。</p>
+        </div>
+        <div class="suggest-card">
+          <div class="sg-icon">🎬</div>
+          <h3>推荐课程</h3>
+          <p class="text-2 mb-0">沿学习路线补齐大模型基础与项目实战课程，带着面试中暴露的短板去看，吸收效率更高。</p>
+        </div>
+        <div class="suggest-card">
+          <div class="sg-icon">🎙️</div>
+          <h3>推荐再次面试</h3>
+          <p class="text-2">复盘完本次报告后，再来一场同方向面试，检验改进效果。</p>
+          <button class="btn btn-primary" id="btn-again-card">再来一次</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="report-actions">
+    <button class="btn btn-lg" id="btn-history">查看历史记录</button>
+    <button class="btn btn-primary btn-lg" id="btn-again">再来一次</button>
+    <button class="btn btn-lg" id="btn-replay">查看面试回放</button>
+  </div>
+
+</div>
+<footer id="site-footer"></footer>
+
+<div class="modal-overlay" id="replay-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>面试回放 · 问答时间线</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body replay-list" id="replay-list"></div>
+    <div class="modal-footer"><button class="btn" data-close>关闭</button></div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+  var LS_SESSION = "yzsx_iv_session";
+
+  /* ---------- 数据来源：有真实会话得分用会话，否则示例数据（综合分 78） ---------- */
+  var sess = null;
+  try { sess = JSON.parse(localStorage.getItem(LS_SESSION)); } catch (e) {}
+  var hasReal = sess && sess.scores && sess.scores.length > 0;
+
+  var data;
+  if (hasReal) {
+    var scores = sess.scores.slice(0, sess.cfg.count);
+    var avg10 = scores.reduce(function (a, b) { return a + b; }, 0) / scores.length; /* 0-10 */
+    data = {
+      direction: sess.cfg.direction,
+      difficultyName: sess.cfg.difficultyName || DB.diffLabel[sess.cfg.difficulty] || "中等",
+      score100: Math.round(avg10 * 10),
+      accuracy: Math.round(avg10 * 10),
+      durationSec: sess.elapsed || 0,
+      count: scores.length,
+      avg10: avg10
+    };
+  } else {
+    data = {
+      direction: "AI应用与智能体开发",
+      difficultyName: "中等",
+      score100: 78,
+      accuracy: 76,
+      durationSec: 1520,
+      count: 10,
+      avg10: 7.8
+    };
+  }
+
+  /* ---------- 报告头 ---------- */
+  UI.$("#report-meta").textContent =
+    data.direction + " · " + data.difficultyName + " · 面试时间 " + UI.fmtDateTime(new Date());
+
+  /* ---------- 环形图 ---------- */
+  var C = 2 * Math.PI * 70; /* 439.82 */
+  var fg = UI.$("#ring-fg");
+  var ringColor = data.score100 >= 80 ? "var(--success)" : (data.score100 >= 60 ? "var(--warning)" : "var(--danger)");
+  fg.style.stroke = ringColor;
+  fg.setAttribute("stroke-dasharray", "0 " + C.toFixed(1));
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      fg.setAttribute("stroke-dasharray", (C * data.score100 / 100).toFixed(1) + " " + C.toFixed(1));
+    });
+  });
+  UI.animateNumber(UI.$("#ring-num"), data.score100, { duration: 1200 });
+
+  /* ---------- 明细 ---------- */
+  UI.$("#sd-accuracy").textContent = data.accuracy + "%";
+  UI.$("#sd-duration").textContent = UI.fmtHumanDur(data.durationSec);
+  UI.$("#sd-count").textContent = data.count + " 题";
+
+  /* ---------- 同方向历史对比 ---------- */
+  var lastSame = null;
+  for (var i = 0; i < DB.interviewRecords.length; i++) {
+    if (DB.interviewRecords[i].direction === data.direction) { lastSame = DB.interviewRecords[i]; break; }
+  }
+  if (lastSame) {
+    var diff = data.score100 - lastSame.score;
+    var cls = diff > 0 ? "trend-up" : (diff < 0 ? "trend-down" : "trend-flat");
+    var word = diff > 0 ? "提升" : (diff < 0 ? "下降" : "持平");
+    UI.$("#trend-wrap").innerHTML =
+      '<div class="sd-label mb-8">同方向历史成绩对比</div>' +
+      '<span class="trend-badge ' + cls + '">相比上次 ' + (diff > 0 ? "+" : "") + diff + "（" + word + "）</span>" +
+      '<div class="pc-tip mt-8">上次同方向成绩：' + lastSame.score + " 分（" + lastSame.datetime + "）</div>";
+  } else {
+    UI.$("#trend-wrap").innerHTML = '<div class="sd-label">同方向历史成绩对比</div><div class="pc-tip">暂无同方向历史成绩</div>';
+  }
+
+  /* ---------- 六维能力 ---------- */
+  var dims = ["专业基础", "表达沟通", "逻辑思维", "项目经验", "应变能力", "岗位匹配"];
+  var offsets = [0.4, -0.2, 0.2, -0.3, 0.1, 0.3];
+  var dimScores = dims.map(function (name, idx) {
+    var v = data.avg10 + offsets[idx];
+    v = Math.max(0, Math.min(10, v));
+    return { name: name, score: Math.round(v * 10) / 10 };
+  });
+  UI.$("#dim-grid").innerHTML = dimScores.map(function (d) {
+    var barCls = d.score >= 8 ? "success" : (d.score >= 6 ? "pb-warn" : "pb-danger");
+    return '<div class="dim-card">' +
+      '<div class="dim-name">' + d.name + "</div>" +
+      '<div class="dim-score">' + d.score.toFixed(1) + "</div>" +
+      '<div class="progress"><div class="progress-bar ' + barCls + '" style="width:' + (d.score * 10) + '%"></div></div>' +
+      "</div>";
+  }).join("");
+
+  /* ---------- 优缺点 / 改进建议（按维度内容生成） ---------- */
+  var dimContent = {
+    "专业基础": { good: "专业概念掌握扎实，回答问题时术语使用准确", bad: "部分基础概念表述还不够严谨", tip: "建议系统复习核心概念，并用自己的话复述形成闭环" },
+    "表达沟通": { good: "表达流畅有条理，能抓住重点展开", bad: "个别回答铺垫偏长，重点不够突出", tip: "建议先给结论再展开论证，控制在 2 分钟内讲清一件事" },
+    "逻辑思维": { good: "分析问题逻辑清晰，能分层递进", bad: "复杂问题的分层拆解还可以更细", tip: "建议多用总-分-总结构，边说边给出判断依据" },
+    "项目经验": { good: "项目经历描述具体，能量化呈现结果", bad: "项目中的个人贡献与难点剖析不够深入", tip: "建议按 STAR 结构复盘项目，突出你解决的关键问题" },
+    "应变能力": { good: "面对追问反应较快，能灵活调整思路", bad: "遇到开放性问题时容易发散", tip: "建议先框定回答边界，再在边界内给 2-3 个要点" },
+    "岗位匹配": { good: "能力与岗位要求匹配度较高，动机清晰", bad: "对目标岗位的工作内容理解还可更具体", tip: "建议研究岗位 JD，把自身经历逐条对齐到岗位要求" }
+  };
+  var sorted = dimScores.slice().sort(function (a, b) { return b.score - a.score; });
+  var top2 = sorted.slice(0, 2), low2 = sorted.slice(-2).reverse();
+  UI.$("#pros-list").innerHTML = top2.map(function (d) {
+    return '<div class="pc-item pc-good"><span class="pc-icon">✓</span><div><div>' +
+      UI.esc(dimContent[d.name].good) + '</div><div class="pc-tip">' + d.name + " " + d.score.toFixed(1) + " 分</div></div></div>";
+  }).join("");
+  UI.$("#cons-list").innerHTML = low2.map(function (d) {
+    return '<div class="pc-item pc-bad"><span class="pc-icon">▲</span><div><div>' +
+      UI.esc(dimContent[d.name].bad) + '</div><div class="pc-tip">' + UI.esc(dimContent[d.name].tip) + "</div></div></div>";
+  }).join("");
+  var advice = [
+    "围绕「" + low2[0].name + "」做专项补强：" + dimContent[low2[0].name].tip + "。",
+    "复盘本次全部作答，把表述不完整的要点写成 3 句话版本，反复练习到脱口而出。",
+    "结合错题本与专项题库巩固薄弱知识点，再预约一场同方向模拟面试检验效果。"
+  ];
+  UI.$("#advice-list").innerHTML = advice.map(function (t, i) {
+    return '<li><span class="adv-no">' + (i + 1) + "</span><span>" + UI.esc(t) + "</span></li>";
+  }).join("");
+
+  /* ---------- 操作 ---------- */
+  function goAgain() {
+    localStorage.removeItem(LS_SESSION);
+    location.href = "interview.html";
+  }
+  UI.$("#btn-history").addEventListener("click", function () { location.href = "interview-records.html"; });
+  UI.$("#btn-again").addEventListener("click", goAgain);
+  UI.$("#btn-again-card").addEventListener("click", goAgain);
+
+  UI.$("#btn-replay").addEventListener("click", function () {
+    var rows;
+    if (hasReal) {
+      var byQ = {};
+      sess.messages.forEach(function (m) {
+        if (m.role === "me") (byQ[m.qi] = byQ[m.qi] || {}).answer = m.text;
+        if (m.kind === "feedback") (byQ[m.qi] = byQ[m.qi] || {}).feedback = m;
+      });
+      rows = Object.keys(byQ).sort(function (a, b) { return a - b; }).map(function (k) {
+        var qText = DB.interviewScript[k % DB.interviewScript.length].q;
+        var o = byQ[k];
+        return '<div class="replay-item">' +
+          '<div class="rp-q">Q' + (parseInt(k, 10) + 1) + " · " + UI.esc(qText) + "</div>" +
+          '<div class="rp-a">我的回答：' + UI.esc(o.answer || "（未作答）") + "</div>" +
+          '<div class="rp-fb">AI 评分：' + (o.feedback ? (o.feedback.score + " 分 · " + UI.esc(o.feedback.text)) : "—") + "</div>" +
+          "</div>";
+      }).join("");
+    } else {
+      rows = DB.interviewScript.map(function (s, i) {
+        return '<div class="replay-item">' +
+          '<div class="rp-q">Q' + (i + 1) + " · " + UI.esc(s.q) + "</div>" +
+          '<div class="rp-a">示例作答（演示数据）</div>' +
+          '<div class="rp-fb">AI 评分：' + s.feedback.score + " 分 · " + UI.esc(s.feedback.comment) + "</div>" +
+          "</div>";
+      }).join("");
+    }
+    UI.$("#replay-list").innerHTML = rows;
+    UI.openModal("replay-modal");
+  });
+})();
+</script>
+</body>
+</html>

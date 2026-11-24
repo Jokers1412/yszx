@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学习路线管理 · 云枢智学管理后台</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  /* 页面特有样式 */
+  .rc-desc {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; font-size: 13px; margin: 8px 0 0;
+  }
+  .rc-actions { flex-wrap: wrap; }
+  .rc-meta { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .course-pick-list {
+    max-height: 280px; overflow-y: auto; border: 1px solid var(--line);
+    border-radius: var(--radius-sm); padding: 6px;
+  }
+  .pick-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 6px; font-size: 13px;
+  }
+  .pick-row:hover { background: var(--surface-2); }
+  .pick-row .pk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icon-btn {
+    width: 24px; height: 24px; border: 1px solid var(--line-strong); background: var(--surface);
+    border-radius: 4px; cursor: pointer; font-size: 12px; color: var(--ink-2); line-height: 1;
+  }
+  .icon-btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+  .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .group-title {
+    font-size: 12px; color: var(--ink-3); padding: 8px 8px 4px; letter-spacing: 1px;
+  }
+  .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .detail-header h3 { margin: 0; font-size: 17px; }
+  .detail-header .spacer { flex: 1; }
+</style>
+</head>
+<body class="admin-body" data-page="routes">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <!-- 路线列表视图 -->
+      <div id="view-list">
+        <div class="toolbar-row">
+          <h3 class="card-title">学习路线</h3>
+          <div class="toolbar-right">
+            <button class="btn btn-primary" id="btn-new-route">＋ 新建路线</button>
+          </div>
+        </div>
+        <div class="route-admin-grid" id="route-grid"></div>
+        <div class="empty-state hidden" id="route-empty">
+          <div class="empty-icon">🗺️</div>
+          <div class="empty-title">暂无学习路线，点击上方新建路线创建一条</div>
+        </div>
+      </div>
+
+      <!-- 路线详情视图（课程管理） -->
+      <div id="view-detail" class="hidden">
+        <div class="detail-header">
+          <button class="btn btn-sm" id="btn-back">‹ 返回列表</button>
+          <h3 id="detail-title"></h3>
+          <div class="spacer"></div>
+          <button class="btn btn-primary" id="btn-add-courses">从课程库添加</button>
+        </div>
+        <div class="card mb-16">
+          <div class="card-body">
+            <dl class="desc-list" id="detail-desc"></dl>
+          </div>
+        </div>
+        <div class="card">
+          <div class="table-wrap" id="detail-table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th style="width:8%">序号</th>
+                  <th style="width:20%">BV号</th>
+                  <th>课程名称</th>
+                  <th style="width:12%">时长</th>
+                  <th style="width:12%">排序</th>
+                  <th style="width:12%">操作</th>
+                </tr>
+              </thead>
+              <tbody id="detail-rows"></tbody>
+            </table>
+          </div>
+          <div class="empty-state hidden" id="detail-empty">
+            <div class="empty-icon">🎬</div>
+            <div class="empty-title">暂无课程，点击右上角从课程库添加</div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- 新建 / 编辑路线弹窗 -->
+<div class="modal-overlay" id="modal-route" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header"><h3 id="route-modal-title">新建学习路线</h3><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <h4 class="mt-0">基本信息</h4>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label">路线名称<span class="req">*</span></label>
+          <input class="input" id="r-name" placeholder="请输入路线名称">
+        </div>
+        <div class="field">
+          <label class="field-label">关联学科</label>
+          <select class="select" id="r-subject"></select>
+        </div>
+        <div class="field">
+          <label class="field-label">状态</label>
+          <div class="checkbox-row" style="height:34px">
+            <label class="switch"><input type="checkbox" id="r-enabled" checked><span class="slider"></span></label>
+            <span id="r-status-text">启用</span>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">路线图标</label>
+          <input class="input" id="r-icon" placeholder="Emoji，如 🚀">
+        </div>
+        <div class="field">
+          <label class="field-label">适合学历</label>
+          <input class="input" id="r-audience" placeholder="如 本科及以上">
+        </div>
+        <div class="field full">
+          <label class="field-label">路线描述</label>
+          <textarea class="textarea" id="r-desc" placeholder="请输入路线描述"></textarea>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <h4>路线课程</h4>
+      <div class="form-grid">
+        <div>
+          <div class="field-label">可选课程（按所选学科）</div>
+          <div class="course-pick-list" id="r-course-checks"></div>
+        </div>
+        <div>
+          <div class="field-label">已选课程（按学习顺序）</div>
+          <div class="course-pick-list" id="r-selected"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close>取消</button>
+      <button class="btn btn-primary" id="r-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 预览弹窗（学员视角） -->
+<div class="modal-overlay" id="modal-preview" hidden>
+  <div class="modal">
+    <div class="modal-header"><h3>路线预览（学员视角）</h3><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body" id="preview-body"></div>
+    <div class="modal-footer"><button class="btn btn-primary" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- 从课程库添加弹窗 -->
+<div class="modal-overlay" id="modal-add" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header"><h3>从课程库添加</h3><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="flex gap-8 mb-16">
+        <input class="input" id="add-kw" placeholder="搜索课程名称 / BV号" style="flex:1">
+        <select class="select" id="add-group" style="width:auto">
+          <option value="">全部课程</option>
+          <option value="in">本学科课程</option>
+          <option value="out">其他学科课程（跨学科补充）</option>
+        </select>
+      </div>
+      <div class="course-pick-list" id="add-list"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close>取消</button>
+      <button class="btn btn-primary" id="add-done">完成添加</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var routes = DB.routes;
+  var courses = DB.courses;
+
+  /* ================= 工具 ================= */
+  function routeById(id) { return routes.filter(function (r) { return r.id === id; })[0]; }
+  function courseById(id) { return courses.filter(function (c) { return c.id === id; })[0]; }
+  function subjectName(id) {
+    var s = DB.subjects.filter(function (x) { return x.id === id; })[0];
+    return s ? s.name : "—";
+  }
+  function fmtDur(min) {
+    var h = Math.floor(min / 60), m = min % 60;
+    if (h && m) return h + " 小时 " + m + " 分钟";
+    if (h) return h + " 小时";
+    return m + " 分钟";
+  }
+  function totalMin(r) {
+    return (r.courseIds || []).reduce(function (a, id) {
+      var c = courseById(id);
+      return a + (c ? c.durationMin : 0);
+    }, 0);
+  }
+  function liveRoutes() { return routes.filter(function (r) { return !r.deleted; }); }
+
+  var view = "list";
+  var currentId = null;
+
+  /* ================= 列表视图 ================= */
+  function renderList() {
+    var data = liveRoutes();
+    var grid = document.getElementById("route-grid");
+    var empty = document.getElementById("route-empty");
+
+    if (!data.length) {
+      grid.innerHTML = "";
+      grid.classList.add("hidden");
+      empty.classList.remove("hidden");
+    } else {
+      grid.classList.remove("hidden");
+      empty.classList.add("hidden");
+      grid.innerHTML = data.map(function (r) {
+        var enabled = r.status === "enabled";
+        var previews = (r.courseIds || []).slice(0, 4).map(function (id) {
+          var c = courseById(id);
+          return '<div class="rc-thumb">' + (c ? UI.esc(c.cover) : "🎬") + "</div>";
+        }).join("");
+        return '<div class="card route-admin-card" data-id="' + r.id + '">' +
+          '<div class="rc-body">' +
+          '  <div class="flex-between"><h3 class="card-title">' + UI.esc(r.icon || "🗺️") + " " + UI.esc(r.name) + "</h3>" +
+          '    <span class="badge ' + (enabled ? "badge-green" : "badge-gray") + '">' + (enabled ? "启用" : "禁用") + "</span></div>" +
+          '  <div class="rc-meta">关联学科：' + UI.esc(subjectName(r.subjectId)) + "</div>" +
+          '  <div class="rc-meta">适合学历：' + UI.esc(r.audience || "不限") + "</div>" +
+          '  <div style="font-size:13px;margin-top:8px">共 ' + (r.courseIds || []).length + " 门 B站课程 · 总计 " +
+          fmtDur(totalMin(r)) + "</div>" +
+          '  <p class="rc-desc text-2">' + UI.esc(r.desc || "") + "</p>" +
+          '  <div class="rc-preview">' + previews + "</div>" +
+          "</div>" +
+          '<div class="card-footer rc-actions">' +
+          '  <button class="btn btn-sm" data-act="toggle">' + (enabled ? "禁用" : "启用") + "</button>" +
+          '  <button class="btn btn-sm" data-act="preview">预览</button>' +
+          '  <button class="btn btn-sm" data-act="detail">课程管理</button>' +
+          '  <button class="btn btn-sm" data-act="edit">编辑</button>' +
+          '  <button class="btn btn-sm btn-soft-danger" data-act="del">删除</button>' +
+          "</div></div>";
+      }).join("");
+    }
+  }
+
+  document.getElementById("route-grid").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-act]");
+    if (!b) return;
+    var id = b.closest(".route-admin-card").dataset.id;
+    var r = routeById(id);
+    if (!r) return;
+    var act = b.dataset.act;
+    if (act === "toggle") {
+      var toEnable = r.status !== "enabled";
+      UI.confirm({
+        title: toEnable ? "启用路线" : "禁用路线",
+        text: toEnable ? "确定要启用该学习路线吗？学员端将展示此路线。" : "确定要禁用该学习路线吗？学员端将不再展示此路线。",
+        okText: toEnable ? "启用" : "禁用"
+      }).then(function (ok) {
+        if (!ok) return;
+        r.status = toEnable ? "enabled" : "disabled";
+        UI.toast(toEnable ? "已启用" : "已禁用");
+        renderList();
+      });
+    } else if (act === "preview") openPreview(r);
+    else if (act === "detail") openDetail(r.id);
+    else if (act === "edit") openForm(r);
+    else if (act === "del") {
+      UI.confirm({ title: "删除路线", text: "确定删除该学习路线吗？删除为逻辑删除，数据保留可恢复。", okText: "删除", danger: true })
+        .then(function (ok) {
+          if (!ok) return;
+          r.deleted = true;
+          UI.toast("已删除");
+          renderList();
+        });
+    }
+  });
+
+  /* ================= 详情视图（课程管理） ================= */
+  function openDetail(id) {
+    currentId = id;
+    view = "detail";
+    document.getElementById("view-list").classList.add("hidden");
+    document.getElementById("view-detail").classList.remove("hidden");
+    renderDetail();
+  }
+  function backToList() {
+    view = "list";
+    document.getElementById("view-detail").classList.add("hidden");
+    document.getElementById("view-list").classList.remove("hidden");
+    renderList();
+  }
+  document.getElementById("btn-back").addEventListener("click", backToList);
+
+  function renderDetail() {
+    var r = routeById(currentId);
+    if (!r) { backToList(); return; }
+
+    document.getElementById("detail-title").textContent = r.name + " - 课程管理";
+    document.getElementById("detail-desc").innerHTML =
+      "<dt>学科</dt><dd>" + UI.esc(subjectName(r.subjectId)) + "</dd>" +
+      "<dt>状态</dt><dd>" + (r.status === "enabled"
+        ? '<span class="badge badge-green">启用</span>' : '<span class="badge badge-gray">禁用</span>') + "</dd>" +
+      "<dt>描述</dt><dd>" + UI.esc(r.desc || "—") + "</dd>" +
+      "<dt>课程数</dt><dd>共 " + (r.courseIds || []).length + " 门 B站课程</dd>" +
+      "<dt>总时长</dt><dd>" + fmtDur(totalMin(r)) + "</dd>" +
+      "<dt>适合学历</dt><dd>" + UI.esc(r.audience || "不限") + "</dd>";
+
+    var ids = r.courseIds || [];
+    var wrap = document.getElementById("detail-table-wrap");
+    var empty = document.getElementById("detail-empty");
+    if (!ids.length) {
+      wrap.classList.add("hidden");
+      empty.classList.remove("hidden");
+    } else {
+      wrap.classList.remove("hidden");
+      empty.classList.add("hidden");
+      document.getElementById("detail-rows").innerHTML = ids.map(function (id, i) {
+        var c = courseById(id);
+        return "<tr data-id=\"" + id + "\"><td>" + (i + 1) + "</td><td>" + UI.esc(c.bv || "—") + "</td><td>" +
+          UI.esc(c.title) + '</td><td class="nowrap">' + UI.esc(c.duration) + "</td>" +
+          '<td><button class="icon-btn" data-act="up"' + (i === 0 ? " disabled" : "") + ">↑</button> " +
+          '<button class="icon-btn" data-act="down"' + (i === ids.length - 1 ? " disabled" : "") + ">↓</button></td>" +
+          '<td class="cell-actions"><button class="btn-link danger" data-act="remove">移除</button></td></tr>';
+      }).join("");
+    }
+  }
+
+  document.getElementById("detail-rows").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-act]");
+    if (!b || b.disabled) return;
+    var r = routeById(currentId);
+    if (!r) return;
+    var id = b.closest("tr").dataset.id;
+    var idx = r.courseIds.indexOf(id);
+    var act = b.dataset.act;
+
+    if (act === "up" && idx > 0) {
+      r.courseIds.splice(idx - 1, 0, r.courseIds.splice(idx, 1)[0]);
+      renderDetail();
+    } else if (act === "down" && idx < r.courseIds.length - 1) {
+      r.courseIds.splice(idx + 1, 0, r.courseIds.splice(idx, 1)[0]);
+      renderDetail();
+    } else if (act === "remove") {
+      UI.confirm({ title: "移除课程", text: "确定将该课程从路线中移除吗？", okText: "移除", danger: true })
+        .then(function (ok) {
+          if (!ok) return;
+          r.courseIds.splice(idx, 1);
+          UI.toast("已移除");
+          renderDetail();
+        });
+    }
+  });
+
+  /* ================= 新建 / 编辑弹窗 ================= */
+  var editingId = null;
+  var selCourses = [];
+
+  var rSubject = document.getElementById("r-subject");
+  rSubject.innerHTML = DB.subjects.map(function (s) {
+    return '<option value="' + s.id + '">' + UI.esc(s.icon + " " + s.name) + "</option>";
+  }).join("");
+
+  var rEnabled = document.getElementById("r-enabled");
+  rEnabled.addEventListener("change", function () {
+    document.getElementById("r-status-text").textContent = rEnabled.checked ? "启用" : "禁用";
+  });
+  rSubject.addEventListener("change", renderCourseChecks);
+
+  function openForm(r) {
+    editingId = r ? r.id : null;
+    document.getElementById("route-modal-title").textContent = r ? "编辑学习路线" : "新建学习路线";
+    document.getElementById("r-name").value = r ? r.name : "";
+    rSubject.value = r ? r.subjectId : DB.subjects[0].id;
+    rEnabled.checked = r ? r.status === "enabled" : true;
+    document.getElementById("r-status-text").textContent = rEnabled.checked ? "启用" : "禁用";
+    document.getElementById("r-icon").value = r ? (r.icon || "") : "";
+    document.getElementById("r-audience").value = r ? (r.audience || "") : "";
+    document.getElementById("r-desc").value = r ? (r.desc || "") : "";
+    selCourses = r ? (r.courseIds || []).slice() : [];
+    renderCourseChecks();
+    renderSelected();
+    UI.openModal("modal-route");
+  }
+  document.getElementById("btn-new-route").addEventListener("click", function () { openForm(null); });
+
+  // 可勾选课程（按所选学科过滤）
+  function renderCourseChecks() {
+    var sid = rSubject.value;
+    var pool = courses.filter(function (c) { return c.subjectIds.indexOf(sid) >= 0; });
+    var host = document.getElementById("r-course-checks");
+    if (!pool.length) {
+      host.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-title">该学科暂无课程</div></div>';
+      return;
+    }
+    host.innerHTML = pool.map(function (c) {
+      return '<label class="pick-row"><input type="checkbox" data-id="' + c.id + '"' +
+        (selCourses.indexOf(c.id) >= 0 ? " checked" : "") + ">" +
+        '<span class="pk-name">' + UI.esc(c.cover + " " + c.title) + "</span>" +
+        '<span class="muted nowrap">' + UI.esc(c.duration) + "</span></label>";
+    }).join("");
+  }
+
+  document.getElementById("r-course-checks").addEventListener("change", function (e) {
+    var cb = e.target.closest("input[type=checkbox]");
+    if (!cb) return;
+    var id = cb.dataset.id;
+    var i = selCourses.indexOf(id);
+    if (cb.checked && i < 0) selCourses.push(id);
+    else if (!cb.checked && i >= 0) selCourses.splice(i, 1);
+    renderSelected();
+  });
+
+  // 已选列表：↑↓ 排序 + 移除
+  function renderSelected() {
+    var host = document.getElementById("r-selected");
+    if (!selCourses.length) {
+      host.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-title">尚未选择课程</div>' +
+        '<div class="empty-sub">在左侧勾选课程后会出现在这里</div></div>';
+      return;
+    }
+    host.innerHTML = selCourses.map(function (id, i) {
+      var c = courseById(id);
+      return '<div class="pick-row" data-id="' + id + '">' +
+        '<span class="muted">' + (i + 1) + "</span>" +
+        '<span class="pk-name">' + UI.esc((c ? c.cover + " " + c.title : id)) + "</span>" +
+        '<button class="icon-btn" data-act="up"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
+        '<button class="icon-btn" data-act="down"' + (i === selCourses.length - 1 ? " disabled" : "") + ">↓</button>" +
+        '<button class="btn-link danger" data-act="remove">移除</button></div>';
+    }).join("");
+  }
+
+  document.getElementById("r-selected").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-act]");
+    if (!b || b.disabled) return;
+    var id = b.closest(".pick-row").dataset.id;
+    var i = selCourses.indexOf(id);
+    var act = b.dataset.act;
+    if (act === "up" && i > 0) {
+      selCourses.splice(i - 1, 0, selCourses.splice(i, 1)[0]);
+    } else if (act === "down" && i < selCourses.length - 1) {
+      selCourses.splice(i + 1, 0, selCourses.splice(i, 1)[0]);
+    } else if (act === "remove") {
+      selCourses.splice(i, 1);
+      renderCourseChecks();
+    }
+    renderSelected();
+  });
+
+  document.getElementById("r-save").addEventListener("click", function () {
+    var name = document.getElementById("r-name").value.trim();
+    if (!name) {
+      UI.toast("请输入路线名称", "warn");
+      document.getElementById("r-name").classList.add("error");
+      return;
+    }
+    document.getElementById("r-name").classList.remove("error");
+    var payload = {
+      name: name,
+      subjectId: rSubject.value,
+      status: rEnabled.checked ? "enabled" : "disabled",
+      icon: document.getElementById("r-icon").value.trim(),
+      audience: document.getElementById("r-audience").value.trim(),
+      desc: document.getElementById("r-desc").value.trim(),
+      courseIds: selCourses.slice()
+    };
+    if (editingId) {
+      var r = routeById(editingId);
+      Object.keys(payload).forEach(function (k) { r[k] = payload[k]; });
+      r.updatedAt = UI.todayStr();
+      UI.toast("保存成功");
+    } else {
+      payload.id = "r-" + Date.now();
+      payload.learned = [];
+      payload.updatedAt = UI.todayStr();
+      routes.unshift(payload);
+      UI.toast("创建成功");
+    }
+    UI.closeModal("modal-route");
+    if (view === "detail" && editingId === currentId) renderDetail();
+    else renderList();
+  });
+
+  /* ================= 预览弹窗（学员视角） ================= */
+  function openPreview(r) {
+    var ids = r.courseIds || [];
+    document.getElementById("preview-body").innerHTML =
+      "<h3>" + UI.esc(r.icon || "🗺️") + " " + UI.esc(r.name) + "</h3>" +
+      '<p class="text-2">' + UI.esc(r.desc || "（暂无描述）") + "</p>" +
+      '<dl class="desc-list">' +
+      "<dt>学科</dt><dd>" + UI.esc(subjectName(r.subjectId)) + "</dd>" +
+      "<dt>适合学历</dt><dd>" + UI.esc(r.audience || "不限") + "</dd>" +
+      "<dt>课程数</dt><dd>共 " + ids.length + " 门 B站课程</dd>" +
+      "<dt>总时长</dt><dd>" + fmtDur(totalMin(r)) + "</dd>" +
+      "</dl><div class=\"divider\"></div>" +
+      '<div class="field-label">课程清单（按学习顺序）</div>' +
+      (ids.length
+        ? '<div class="list-row" style="display:block">' + ids.map(function (id, i) {
+            var c = courseById(id);
+            return '<div class="flex-between" style="padding:6px 0;border-bottom:1px dashed var(--line)">' +
+              '<span><b>' + (i + 1) + ".</b> " + UI.esc(c.title) + "</span>" +
+              '<span class="muted nowrap">' + UI.esc(c.bv || "—") + " · " + UI.esc(c.duration) + "</span></div>";
+          }).join("") + "</div>"
+        : '<div class="muted">课程筹备中，敬请期待</div>');
+    UI.openModal("modal-preview");
+  }
+
+  /* ================= 从课程库添加 ================= */
+  var addKw = document.getElementById("add-kw");
+  var addGroup = document.getElementById("add-group");
+
+  function renderAddList() {
+    var r = routeById(currentId);
+    if (!r) return;
+    var kw = addKw.value.trim().toLowerCase();
+    var g = addGroup.value;
+    var pool = courses.filter(function (c) {
+      if (kw && (c.title + c.bv).toLowerCase().indexOf(kw) < 0) return false;
+      var inGroup = c.subjectIds.indexOf(r.subjectId) >= 0;
+      if (g === "in") return inGroup;
+      if (g === "out") return !inGroup;
+      return true;
+    });
+    var inPool = pool.filter(function (c) { return c.subjectIds.indexOf(r.subjectId) >= 0; });
+    var outPool = pool.filter(function (c) { return c.subjectIds.indexOf(r.subjectId) < 0; });
+
+    function rows(arr) {
+      return arr.map(function (c) {
+        var added = r.courseIds.indexOf(c.id) >= 0;
+        return '<label class="pick-row"><input type="checkbox" data-id="' + c.id + '"' +
+          (added ? " disabled" : "") + ">" +
+          '<span class="pk-name">' + UI.esc(c.cover + " " + c.title) + "</span>" +
+          '<span class="muted nowrap">' + UI.esc(c.bv || "—") + "</span>" +
+          '<span class="muted nowrap">' + UI.esc(c.duration) + "</span>" +
+          (added ? '<span class="badge badge-gray">已添加</span>' : "") + "</label>";
+      }).join("");
+    }
+
+    var html = "";
+    if (g !== "out" && inPool.length) html += '<div class="group-title">本学科课程</div>' + rows(inPool);
+    if (g !== "in" && outPool.length) html += '<div class="group-title">其他学科课程（跨学科补充）</div>' + rows(outPool);
+    if (!html) html = '<div class="empty-state" style="padding:24px"><div class="empty-title">没有匹配的课程</div></div>';
+    document.getElementById("add-list").innerHTML = html;
+  }
+
+  addKw.addEventListener("input", UI.debounce(renderAddList, 300));
+  addGroup.addEventListener("change", renderAddList);
+
+  document.getElementById("btn-add-courses").addEventListener("click", function () {
+    addKw.value = "";
+    addGroup.value = "";
+    renderAddList();
+    UI.openModal("modal-add");
+  });
+
+  document.getElementById("add-done").addEventListener("click", function () {
+    var r = routeById(currentId);
+    if (!r) return;
+    var checked = Array.prototype.slice.call(
+      document.querySelectorAll("#add-list input[type=checkbox]:checked:not(:disabled)")
+    ).map(function (cb) { return cb.dataset.id; });
+    if (!checked.length) {
+      UI.toast("请先勾选要添加的课程", "warn");
+      return;
+    }
+    checked.forEach(function (id) {
+      if (r.courseIds.indexOf(id) < 0) r.courseIds.push(id);
+    });
+    UI.closeModal("modal-add");
+    UI.toast("已添加 " + checked.length + " 门课程");
+    renderDetail();
+  });
+
+  /* ================= 启动 ================= */
+  renderList();
+
+  // dashboard「创建新路线」→ routes.html?new=1 自动打开新建弹窗
+  if (/[?&]new=1\b/.test(location.search)) {
+    openForm(null);
+  }
+})();
+</script>
+</body>
+</html>

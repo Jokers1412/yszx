@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云枢智学 · 题库管理</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+  .stat-grid-auto {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 16px; margin-bottom: 20px;
+  }
+  .badge-draft { background: #e8edf5; color: #5b6b84; border-color: transparent; }
+  .q-stem-btn {
+    display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; text-align: left;
+  }
+  .opt-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .opt-row .opt-key { width: 18px; color: var(--ink-3); font-weight: 600; flex-shrink: 0; }
+  .opt-row input[type="radio"], .opt-row input[type="checkbox"] { accent-color: var(--brand); flex-shrink: 0; }
+  .detail-opts .opt-item { padding: 6px 10px; border-radius: var(--radius-sm); margin-bottom: 6px; background: var(--surface-2); font-size: 13px; }
+  .detail-opts .opt-item.correct { background: var(--success-bg); color: var(--success-text); }
+</style>
+</head>
+<body class="admin-body" data-page="questions">
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar"></aside>
+  <div class="admin-main">
+    <header class="admin-topbar" id="admin-topbar"></header>
+    <main class="admin-content">
+
+      <!-- 状态流转说明 -->
+      <div class="alert alert-info">
+        状态流转：新增 → 待审核 → 通过 → 已上架；已上架 → 下架 → 已下架 → 重新上架 → 待审核；已驳回 → 重新提交 → 待审核
+      </div>
+
+      <!-- 统计卡片 -->
+      <div class="stat-grid-auto" id="stat-grid"></div>
+
+      <!-- 筛选 -->
+      <div class="filter-bar">
+        <input class="input search-input" id="f-q" placeholder="搜索题干 / 标签关键词">
+        <select class="select" id="f-stage"></select>
+        <select class="select" id="f-type">
+          <option value="">全部类型</option>
+          <option value="single">单选</option>
+          <option value="multi">多选</option>
+          <option value="judge">判断</option>
+          <option value="short">简答</option>
+        </select>
+        <select class="select" id="f-diff">
+          <option value="">全部难度</option>
+          <option value="easy">简单</option>
+          <option value="medium">中等</option>
+          <option value="hard">困难</option>
+        </select>
+        <select class="select" id="f-status">
+          <option value="">全部状态</option>
+          <option value="online">已上架</option>
+          <option value="offline">已下架</option>
+          <option value="pending">待审核</option>
+          <option value="draft">草稿</option>
+          <option value="rejected">已驳回</option>
+        </select>
+      </div>
+
+      <!-- 工具行 -->
+      <div class="toolbar-row">
+        <button class="btn" id="import-btn">导入 Excel</button>
+        <button class="btn" id="export-btn">导出 Excel</button>
+        <button class="btn btn-primary" id="add-q-btn">+ 新增题目</button>
+      </div>
+
+      <!-- 批量操作条 -->
+      <div class="batch-bar" id="batch-bar" hidden>
+        <span class="batch-count" id="batch-count">已选择 0 项</span>
+        <button class="btn btn-sm" data-batch="online">批量上架</button>
+        <button class="btn btn-sm" data-batch="offline">批量下架</button>
+        <button class="btn btn-sm btn-soft-danger" data-batch="del">批量删除</button>
+        <button class="btn btn-sm btn-ghost" data-batch="cancel">取消选择</button>
+      </div>
+
+      <!-- 表格 -->
+      <div class="card" style="margin-top:14px">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="col-check"><input type="checkbox" id="check-all"></th>
+                <th>ID</th>
+                <th>题目</th>
+                <th>阶段</th>
+                <th>类型</th>
+                <th>难度</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th class="cell-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody id="q-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pager"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- 新增 / 编辑题目弹窗 -->
+<div class="modal-overlay" id="q-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3 id="q-modal-title">新增题目</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">题目内容<span class="req">*</span></label>
+        <textarea class="textarea" id="qf-title" placeholder="请输入题干"></textarea>
+        <div class="field-error" id="qf-title-err"></div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label">阶段<span class="req">*</span></label>
+          <select class="select" id="qf-stage"></select>
+          <div class="field-error" id="qf-stage-err"></div>
+        </div>
+        <div class="field">
+          <label class="field-label">类型<span class="req">*</span></label>
+          <select class="select" id="qf-type">
+            <option value="">请选择类型</option>
+            <option value="single">单选</option>
+            <option value="multi">多选</option>
+            <option value="judge">判断</option>
+            <option value="short">简答</option>
+          </select>
+          <div class="field-error" id="qf-type-err"></div>
+        </div>
+        <div class="field">
+          <label class="field-label">难度<span class="req">*</span></label>
+          <select class="select" id="qf-diff">
+            <option value="">请选择难度</option>
+            <option value="easy">简单</option>
+            <option value="medium">中等</option>
+            <option value="hard">困难</option>
+          </select>
+          <div class="field-error" id="qf-diff-err"></div>
+        </div>
+        <div class="field">
+          <label class="field-label">标签</label>
+          <input class="input" id="qf-tags" placeholder="多个标签用逗号分隔，如 大模型,基础概念">
+        </div>
+      </div>
+
+      <!-- 选项管理（单选 / 多选） -->
+      <div class="field" id="qf-options-wrap" hidden>
+        <label class="field-label">选项管理<span class="req">*</span></label>
+        <div id="qf-opts"></div>
+        <div class="flex-between mt-8">
+          <button class="btn btn-sm" id="qf-add-opt">+ 添加选项</button>
+          <span class="field-hint" style="margin:0">2~6 个选项，至少勾选 1 个正确答案</span>
+        </div>
+        <div class="field-error" id="qf-opts-err"></div>
+      </div>
+
+      <!-- 判断题答案 -->
+      <div class="field" id="qf-judge-wrap" hidden>
+        <label class="field-label">正确答案<span class="req">*</span></label>
+        <label class="radio-row"><input type="radio" name="qf-judge" value="T"><span>正确</span></label>
+        <label class="radio-row" style="margin-top:6px"><input type="radio" name="qf-judge" value="F"><span>错误</span></label>
+      </div>
+
+      <!-- 简答题参考答案 -->
+      <div class="field" id="qf-short-wrap" hidden>
+        <label class="field-label">参考答案</label>
+        <textarea class="textarea" id="qf-ref" placeholder="可留空"></textarea>
+        <div class="field-hint">可留空</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">解析</label>
+        <textarea class="textarea" id="qf-analysis" placeholder="答案解析（选填）"></textarea>
+      </div>
+      <div class="field">
+        <label class="field-label">状态</label>
+        <div id="qf-status-view" class="muted">待审核（新增题目保存后进入待审核）</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>取消</button>
+      <button class="btn btn-primary" id="q-save-btn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 题目详情弹窗 -->
+<div class="modal-overlay" id="q-detail" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>题目详情</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body" id="q-detail-body"></div>
+    <div class="modal-footer" id="q-detail-ops"></div>
+  </div>
+</div>
+
+<!-- 导入弹窗 -->
+<div class="modal-overlay" id="import-modal" hidden>
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3>导入题目（Excel）</h3>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="modal-body">
+      <div class="import-drop" id="import-drop">
+        <div style="font-size:34px">📄</div>
+        <div style="margin:8px 0">将 Excel 文件拖拽到此处，或
+          <label for="import-file" style="color:var(--brand);cursor:pointer;text-decoration:underline">选择文件</label>
+        </div>
+        <div style="font-size:12px">支持 .xlsx / .xls，单次 ≤ 500 道</div>
+        <input type="file" id="import-file" class="hidden" accept=".xlsx,.xls">
+      </div>
+      <div class="flex-between mt-16">
+        <div class="muted" id="import-file-name">尚未选择文件</div>
+        <button class="btn btn-sm" id="download-tpl-btn">下载导入模板</button>
+      </div>
+      <div class="import-note mt-16">
+        <b>导入说明</b><br>
+        1. 单张工作表即可，<b>可混排单选 / 多选 / 判断 / 简答四种题型</b>，单次最多 500 道。<br>
+        2. 表头按名称识别、列顺序可变：学科、阶段、题干、题型、难度、选项A~F、正确答案、解析、标签。<br>
+        3. 判断 / 简答行的选项列留空；简答行「正确答案」列填写参考答案（可留空）。<br>
+        4. 阶段按「学科 + 阶段」两级定位，查不到即<b>整份拒绝</b>并报出行号与原因。<br>
+        5. 支持拖拽上传；任一无效行整份拒绝，一行数据都不写入，修正后重新上传。
+      </div>
+      <div id="import-preview" class="mt-16" hidden></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>取消</button>
+      <button class="btn btn-primary" id="import-confirm-btn" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script>
+(function () {
+  "use strict";
+  var esc = UI.esc;
+
+  /* ---------- 内存数据（拷贝自 DB，页面会话内增删改真实生效） ---------- */
+  var questions = JSON.parse(JSON.stringify(DB.questions));
+  var subjects = DB.subjects;
+  var typeLabel = DB.typeLabel, diffLabel = DB.diffLabel, qStatus = DB.qStatus;
+
+  var filters = { q: "", stageId: "", type: "", difficulty: "", status: "" };
+  var page = 1, pageSize = 10;
+  var selected = {};      /* 跨页保留勾选 */
+  var detailId = null;
+
+  /* ---------- 工具 ---------- */
+  function findQ(id) {
+    for (var i = 0; i < questions.length; i++) if (questions[i].id === id) return questions[i];
+    return null;
+  }
+  function stageInfo(stageId) {
+    for (var i = 0; i < subjects.length; i++) {
+      var s = subjects[i];
+      for (var j = 0; j < s.stages.length; j++) {
+        if (s.stages[j].id === stageId) {
+          return { subjectId: s.id, subjectName: s.name, stageName: s.stages[j].name };
+        }
+      }
+    }
+    return { subjectId: "", subjectName: "—", stageName: "—" };
+  }
+  function nextId() {
+    return questions.reduce(function (m, q) { return Math.max(m, q.id); }, 1000) + 1;
+  }
+  function setErr(inputSel, errSel, msg) {
+    var inp = document.querySelector(inputSel);
+    if (inp) inp.classList.add("error");
+    var err = document.querySelector(errSel);
+    if (err) err.textContent = msg;
+  }
+  function clearErrs(scope) {
+    UI.$$(".error", scope).forEach(function (el) { el.classList.remove("error"); });
+    UI.$$(".field-error", scope).forEach(function (el) { el.textContent = ""; });
+  }
+  function statCard(label, value, icon) {
+    return '<div class="card stat-card"><div class="stat-top"><div class="stat-label">' + label +
+      '</div><div class="stat-icon">' + icon + '</div></div><div class="stat-value">' + value + "</div></div>";
+  }
+  function statusBadge(st) {
+    var map = { online: "badge-green", pending: "badge-orange", offline: "badge-gray", draft: "badge-draft", rejected: "badge-red" };
+    return '<span class="badge ' + (map[st] || "badge-gray") + '">' + esc(qStatus[st] || st) + "</span>";
+  }
+  function diffBadge(d) {
+    var map = { easy: "badge-green", medium: "badge-orange", hard: "badge-red" };
+    return '<span class="badge ' + (map[d] || "") + '">' + esc(diffLabel[d] || d) + "</span>";
+  }
+
+  /* ---------- 阶段下拉（按学科 optgroup 分组） ---------- */
+  function stageOptions(firstText) {
+    var h = firstText ? '<option value="">' + firstText + "</option>" : '<option value="">全部阶段</option>';
+    subjects.forEach(function (s) {
+      if (!s.stages.length) return;
+      h += '<optgroup label="' + esc(s.name) + '">' +
+        s.stages.map(function (st) {
+          return '<option value="' + st.id + '">' + esc(st.name) + "</option>";
+        }).join("") + "</optgroup>";
+    });
+    return h;
+  }
+  document.getElementById("f-stage").innerHTML = stageOptions("全部阶段");
+  document.getElementById("qf-stage").innerHTML = stageOptions("请选择阶段");
+
+  /* ---------- 筛选 ---------- */
+  function filtered() {
+    var q = filters.q.trim().toLowerCase();
+    return questions.filter(function (item) {
+      if (q) {
+        var inTitle = item.title.toLowerCase().indexOf(q) >= 0;
+        var inTags = (item.tags || []).join(",").toLowerCase().indexOf(q) >= 0;
+        if (!inTitle && !inTags) return false;
+      }
+      if (filters.stageId && item.stageId !== filters.stageId) return false;
+      if (filters.type && item.type !== filters.type) return false;
+      if (filters.difficulty && item.difficulty !== filters.difficulty) return false;
+      if (filters.status && item.status !== filters.status) return false;
+      return true;
+    });
+  }
+
+  /* ---------- 统计 ---------- */
+  function renderStats() {
+    function cnt(fn) { return questions.filter(fn).length; }
+    document.getElementById("stat-grid").innerHTML =
+      statCard("题目总数", questions.length, "📝") +
+      statCard("已上架", cnt(function (q) { return q.status === "online"; }), "✅") +
+      statCard("待审核", cnt(function (q) { return q.status === "pending"; }), "⏳") +
+      statCard("单选题", cnt(function (q) { return q.type === "single"; }), "🔘") +
+      statCard("多选题", cnt(function (q) { return q.type === "multi"; }), "☑️") +
+      statCard("判断题", cnt(function (q) { return q.type === "judge"; }), "⚖️") +
+      statCard("简答题", cnt(function (q) { return q.type === "short"; }), "✍️");
+  }
+
+  /* ---------- 行操作 ---------- */
+  function opsHtml(q) {
+    var h = "";
+    if (q.status === "pending") {
+      h += '<button class="btn-link" data-act="approve" data-id="' + q.id + '">通过</button>';
+      h += '<button class="btn-link danger" data-act="reject" data-id="' + q.id + '">不通过</button>';
+    } else if (q.status === "online") {
+      h += '<button class="btn-link" data-act="offline" data-id="' + q.id + '">下架</button>';
+    } else if (q.status === "offline") {
+      h += '<button class="btn-link" data-act="online" data-id="' + q.id + '">上架</button>';
+    } else if (q.status === "draft" || q.status === "rejected") {
+      h += '<button class="btn-link" data-act="resubmit" data-id="' + q.id + '">重新提交</button>';
+    }
+    h += '<button class="btn-link" data-act="edit" data-id="' + q.id + '">编辑</button>';
+    h += '<button class="btn-link danger" data-act="del" data-id="' + q.id + '">删除</button>';
+    return h;
+  }
+
+  function doAction(act, id) {
+    var q = findQ(id);
+    if (!q && act !== "view") return;
+    if (act === "view") { openDetail(id); return; }
+    if (act === "edit") { openQModal(id); return; }
+    if (act === "del") { deleteQuestions([id]); return; }
+    if (act === "approve") {
+      UI.confirm({ title: "审核通过", text: "确定将题目 #" + id + " 审核通过吗？通过后题目将立即上架。", okText: "通过" }).then(function (ok) {
+        if (!ok) return;
+        q.status = "online";
+        UI.toast("题目 #" + id + " 已审核通过并上架");
+        render(); refreshDetail();
+      });
+    } else if (act === "reject") {
+      UI.confirm({ title: "审核不通过", text: "确定将题目 #" + id + " 审核不通过吗？将标记为已驳回，可修改后重新提交。", okText: "驳回", danger: true }).then(function (ok) {
+        if (!ok) return;
+        q.status = "rejected";
+        UI.toast("题目 #" + id + " 已驳回");
+        render(); refreshDetail();
+      });
+    } else if (act === "offline") {
+      UI.confirm({ title: "下架题目", text: "确定将题目 #" + id + " 下架吗？下架后学员端不可见。", okText: "下架", danger: true }).then(function (ok) {
+        if (!ok) return;
+        q.status = "offline";
+        UI.toast("题目 #" + id + " 已下架");
+        render(); refreshDetail();
+      });
+    } else if (act === "online") {
+      UI.confirm({ title: "重新上架", text: "确定将题目 #" + id + " 重新上架吗？将转入待审核，审核通过后上架。", okText: "提交上架" }).then(function (ok) {
+        if (!ok) return;
+        q.status = "pending";
+        UI.toast("题目 #" + id + " 已提交重新上架，转入待审核");
+        render(); refreshDetail();
+      });
+    } else if (act === "resubmit") {
+      q.status = "pending";
+      UI.toast("题目 #" + id + " 已重新提交，转入待审核");
+      render(); refreshDetail();
+    }
+  }
+
+  function deleteQuestions(ids) {
+    var n = ids.length;
+    UI.confirm({
+      title: n > 1 ? "批量删除题目" : "删除题目",
+      html: n > 1
+        ? "确定删除选中的 " + n + " 道题目吗？删除后数据保留可恢复。"
+        : "确定删除题目 #" + ids[0] + " 吗？删除后数据保留可恢复。",
+      okText: "删除", danger: true
+    }).then(function (ok) {
+      if (!ok) return;
+      questions = questions.filter(function (q) { return ids.indexOf(q.id) < 0; });
+      ids.forEach(function (id) { delete selected[id]; });
+      if (detailId && ids.indexOf(detailId) >= 0) UI.closeModal("q-detail");
+      UI.toast(n > 1 ? "已批量删除 " + n + " 道题目" : "题目 #" + ids[0] + " 已删除");
+      render();
+    });
+  }
+
+  /* ---------- 表格 ---------- */
+  function renderTable() {
+    var list = filtered();
+    var pages = Math.max(1, Math.ceil(list.length / pageSize));
+    if (page > pages) page = pages;
+    var rows = list.slice((page - 1) * pageSize, page * pageSize);
+    var tbody = document.getElementById("q-tbody");
+
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state">' +
+        '<div class="empty-icon">📝</div><div class="empty-title">暂无匹配的题目，试试调整筛选条件</div></div></td></tr>';
+    } else {
+      tbody.innerHTML = rows.map(function (q) {
+        var si = stageInfo(q.stageId);
+        return "<tr>" +
+          '<td class="col-check"><input type="checkbox" class="row-check" data-id="' + q.id + '"' + (selected[q.id] ? " checked" : "") + "></td>" +
+          "<td class=\"nowrap\">#" + q.id + "</td>" +
+          '<td><button class="btn-link q-stem-btn" data-act="view" data-id="' + q.id + '" title="' + esc(q.title) + '">' + esc(q.title) + "</button></td>" +
+          "<td><div>" + esc(si.stageName) + '</div><div class="muted" style="font-size:11px">' + esc(si.subjectName) + "</div></td>" +
+          '<td><span class="badge">' + esc(typeLabel[q.type] || q.type) + "</span></td>" +
+          "<td>" + diffBadge(q.difficulty) + "</td>" +
+          "<td>" + statusBadge(q.status) + "</td>" +
+          '<td class="nowrap muted">' + esc(q.createdAt || "—") + "</td>" +
+          '<td class="cell-actions">' + opsHtml(q) + "</td>" +
+        "</tr>";
+      }).join("");
+    }
+
+    var pageIds = rows.map(function (q) { return q.id; });
+    var allChecked = pageIds.length > 0 && pageIds.every(function (id) { return selected[id]; });
+    document.getElementById("check-all").checked = allChecked;
+
+    UI.pager(document.getElementById("pager"), {
+      total: list.length, page: page, pageSize: pageSize,
+      onChange: function (n) { page = n; renderTable(); }
+    });
+  }
+
+  function renderBatchBar() {
+    var n = Object.keys(selected).length;
+    var bar = document.getElementById("batch-bar");
+    bar.hidden = n === 0;
+    document.getElementById("batch-count").textContent = "已选择 " + n + " 项";
+  }
+
+  function render() { renderStats(); renderTable(); renderBatchBar(); }
+
+  /* ---------- 新增 / 编辑 ---------- */
+  var qf = { id: null, opts: [], judge: "T" };
+
+  function renderOpts() {
+    var type = document.getElementById("qf-type").value;
+    var multi = type === "multi";
+    document.getElementById("qf-opts").innerHTML = qf.opts.map(function (o, i) {
+      return '<div class="opt-row">' +
+        '<input type="' + (multi ? "checkbox" : "radio") + '" name="qf-correct" data-i="' + i + '"' + (o.correct ? " checked" : "") + ' title="正确答案">' +
+        '<span class="opt-key">' + "ABCDEF"[i] + "</span>" +
+        '<input class="input" data-opt-text="' + i + '" value="' + esc(o.text) + '" placeholder="选项 ' + "ABCDEF"[i] + ' 内容">' +
+        '<button class="btn btn-sm" data-act="opt-del" data-i="' + i + '"' + (qf.opts.length <= 2 ? " disabled" : "") + ">删除</button>" +
+      "</div>";
+    }).join("");
+    document.getElementById("qf-add-opt").disabled = qf.opts.length >= 6;
+  }
+
+  function toggleAnswerAreas() {
+    var t = document.getElementById("qf-type").value;
+    document.getElementById("qf-options-wrap").hidden = !(t === "single" || t === "multi");
+    document.getElementById("qf-judge-wrap").hidden = t !== "judge";
+    document.getElementById("qf-short-wrap").hidden = t !== "short";
+  }
+
+  function openQModal(id) {
+    var q = id ? findQ(id) : null;
+    qf.id = q ? q.id : null;
+    qf.opts = [];
+    qf.judge = "T";
+    document.getElementById("q-modal-title").textContent = q ? "编辑题目 #" + q.id : "新增题目";
+    document.getElementById("qf-title").value = q ? q.title : "";
+    document.getElementById("qf-stage").value = q ? q.stageId : "";
+    document.getElementById("qf-type").value = q ? q.type : "";
+    document.getElementById("qf-diff").value = q ? q.difficulty : "";
+    document.getElementById("qf-tags").value = q ? (q.tags || []).join(",") : "";
+    document.getElementById("qf-analysis").value = q ? (q.analysis || "") : "";
+    document.getElementById("qf-ref").value = q ? (q.refAnswer || "") : "";
+    if (q && (q.type === "single" || q.type === "multi")) {
+      qf.opts = (q.options || []).map(function (o) {
+        return { text: o.text, correct: (q.answer || "").indexOf(o.key) >= 0 };
+      });
+    } else if (!q) {
+      qf.opts = [{ text: "", correct: false }, { text: "", correct: false }, { text: "", correct: false }, { text: "", correct: false }];
+    }
+    if (q && q.type === "judge") qf.judge = q.answer === "F" ? "F" : "T";
+    UI.$$('input[name="qf-judge"]').forEach(function (r) { r.checked = r.value === qf.judge; });
+    document.getElementById("qf-status-view").innerHTML = q
+      ? "当前状态：" + statusBadge(q.status) + ' <span class="muted">（状态由流转操作变更，此处只读）</span>'
+      : "待审核（新增题目保存后进入待审核）";
+    clearErrs(document.getElementById("q-modal"));
+    renderOpts();
+    toggleAnswerAreas();
+    UI.openModal("q-modal");
+    document.getElementById("qf-title").focus();
+  }
+
+  function saveQuestion() {
+    var title = document.getElementById("qf-title").value.trim();
+    var stageId = document.getElementById("qf-stage").value;
+    var type = document.getElementById("qf-type").value;
+    var diff = document.getElementById("qf-diff").value;
+    var tags = document.getElementById("qf-tags").value.split(/[,，]/).map(function (t) { return t.trim(); }).filter(Boolean);
+    var analysis = document.getElementById("qf-analysis").value.trim();
+    var refAnswer = document.getElementById("qf-ref").value.trim();
+
+    clearErrs(document.getElementById("q-modal"));
+    var ok = true;
+    if (!title) { setErr("#qf-title", "#qf-title-err", "请输入题目内容"); ok = false; }
+    if (!stageId) { setErr("#qf-stage", "#qf-stage-err", "请选择阶段"); ok = false; }
+    if (!type) { setErr("#qf-type", "#qf-type-err", "请选择类型"); ok = false; }
+    if (!diff) { setErr("#qf-diff", "#qf-diff-err", "请选择难度"); ok = false; }
+
+    if (type === "single" || type === "multi") {
+      if (qf.opts.length < 2 || qf.opts.length > 6) {
+        document.getElementById("qf-opts-err").textContent = "选项数量需为 2~6 项"; ok = false;
+      } else if (qf.opts.some(function (o) { return !o.text.trim(); })) {
+        document.getElementById("qf-opts-err").textContent = "请填写全部选项内容"; ok = false;
+      } else if (!qf.opts.some(function (o) { return o.correct; })) {
+        document.getElementById("qf-opts-err").textContent = "至少勾选 1 个正确答案"; ok = false;
+      }
+    }
+    if (!ok) { UI.toast("请修正表单中的错误", "warn"); return; }
+
+    var isNew = !qf.id;
+    var q = isNew
+      ? { id: nextId(), createdAt: UI.fmtDateTime(new Date()), done: 0, accuracy: 0, status: "pending" }
+      : findQ(qf.id);
+    q.title = title;
+    q.stageId = stageId;
+    q.subjectId = stageInfo(stageId).subjectId;
+    q.type = type;
+    q.difficulty = diff;
+    q.tags = tags;
+    q.analysis = analysis;
+    if (type === "single" || type === "multi") {
+      q.options = qf.opts.map(function (o, i) { return { key: "ABCDEF"[i], text: o.text.trim() }; });
+      q.answer = qf.opts.map(function (o, i) { return o.correct ? "ABCDEF"[i] : ""; }).join("");
+      delete q.refAnswer;
+    } else if (type === "judge") {
+      q.options = [{ key: "T", text: "正确" }, { key: "F", text: "错误" }];
+      var jr = document.querySelector('input[name="qf-judge"]:checked');
+      q.answer = jr ? jr.value : "T";
+      delete q.refAnswer;
+    } else {
+      q.options = [];
+      q.answer = "";
+      q.refAnswer = refAnswer;
+    }
+    if (isNew) questions.unshift(q);
+
+    UI.closeModal("q-modal");
+    UI.toast(isNew ? "题目 #" + q.id + " 已保存，进入待审核" : "题目 #" + q.id + " 已保存");
+    render();
+    refreshDetail();
+  }
+
+  /* ---------- 详情 ---------- */
+  function openDetail(id) {
+    detailId = id;
+    renderDetail();
+    UI.openModal("q-detail");
+  }
+  function refreshDetail() {
+    if (detailId && !document.getElementById("q-detail").hidden) renderDetail();
+  }
+  function renderDetail() {
+    var q = findQ(detailId);
+    if (!q) return;
+    var si = stageInfo(q.stageId);
+    var done = q.done || 0, acc = q.accuracy || 0;
+    var right = Math.round(done * acc / 100);
+
+    var optsHtml = "";
+    if (q.type === "single" || q.type === "multi") {
+      optsHtml = '<div class="mt-16"><b>选项</b><div class="detail-opts mt-8">' +
+        (q.options || []).map(function (o) {
+          var correct = (q.answer || "").indexOf(o.key) >= 0;
+          return '<div class="opt-item' + (correct ? " correct" : "") + '">' + esc(o.key) + ". " + esc(o.text) +
+            (correct ? " ✓ 正确答案" : "") + "</div>";
+        }).join("") + "</div></div>";
+    } else if (q.type === "judge") {
+      optsHtml = '<div class="mt-16"><b>正确答案</b><div class="detail-opts mt-8"><div class="opt-item correct">' +
+        (q.answer === "F" ? "错误" : "正确") + "</div></div></div>";
+    } else {
+      optsHtml = '<div class="mt-16"><b>参考答案</b><div class="mt-8 text-2">' +
+        (q.refAnswer ? esc(q.refAnswer) : '<span class="muted">（未填写）</span>') + "</div></div>";
+    }
+
+    document.getElementById("q-detail-body").innerHTML =
+      '<div class="desc-list">' +
+        "<dt>阶段</dt><dd>" + esc(si.subjectName) + " / " + esc(si.stageName) + "</dd>" +
+        "<dt>类型</dt><dd><span class=\"badge\">" + esc(typeLabel[q.type] || q.type) + "</span></dd>" +
+        "<dt>难度</dt><dd>" + diffBadge(q.difficulty) + "</dd>" +
+        "<dt>状态</dt><dd>" + statusBadge(q.status) + "</dd>" +
+        "<dt>创建时间</dt><dd>" + esc(q.createdAt || "—") + "</dd>" +
+      "</div>" +
+      '<div class="mt-16"><b>题干</b><p class="text-2 mt-8 mb-0">' + esc(q.title) + "</p></div>" +
+      optsHtml +
+      '<div class="mt-16"><b>标签</b><div class="mt-8">' +
+        ((q.tags || []).length ? q.tags.map(function (t) { return '<span class="tag">' + esc(t) + "</span>"; }).join(" ") : '<span class="muted">无</span>') +
+      "</div></div>" +
+      '<div class="mt-16"><b>解析</b><div class="mt-8 text-2">' + (q.analysis ? esc(q.analysis) : '<span class="muted">无</span>') + "</div></div>" +
+      '<div class="detail-stats mt-16">' +
+        '<div class="ds-item"><div class="num">' + done + '</div><div class="label">答题次数</div></div>' +
+        '<div class="ds-item"><div class="num">' + right + '</div><div class="label">正确次数</div></div>' +
+        '<div class="ds-item"><div class="num">' + acc + '%</div><div class="label">正确率</div></div>' +
+      "</div>";
+
+    document.getElementById("q-detail-ops").innerHTML =
+      '<button class="btn btn-ghost" data-close>关闭</button>' + opsHtml(q);
+  }
+
+  /* ---------- 批量操作 ---------- */
+  document.getElementById("batch-bar").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-batch]");
+    if (!btn) return;
+    var act = btn.dataset.batch;
+    var ids = Object.keys(selected).map(Number);
+    if (act === "cancel") {
+      selected = {};
+      render();
+      return;
+    }
+    if (!ids.length) { UI.toast("请先勾选题目", "warn"); return; }
+    if (act === "online") {
+      UI.confirm({ title: "批量上架", text: "确定将选中的 " + ids.length + " 道题目批量上架吗？上架后学员端可见。", okText: "批量上架" }).then(function (ok) {
+        if (!ok) return;
+        ids.forEach(function (id) { var q = findQ(id); if (q) q.status = "online"; });
+        selected = {};
+        UI.toast("已批量上架 " + ids.length + " 道题目");
+        render(); refreshDetail();
+      });
+    } else if (act === "offline") {
+      UI.confirm({ title: "批量下架", text: "确定将选中的 " + ids.length + " 道题目批量下架吗？下架后学员端不可见。", okText: "批量下架", danger: true }).then(function (ok) {
+        if (!ok) return;
+        ids.forEach(function (id) { var q = findQ(id); if (q) q.status = "offline"; });
+        selected = {};
+        UI.toast("已批量下架 " + ids.length + " 道题目");
+        render(); refreshDetail();
+      });
+    } else if (act === "del") {
+      deleteQuestions(ids);
+    }
+  });
+
+  /* ---------- 表格事件 ---------- */
+  var tbody = document.getElementById("q-tbody");
+  tbody.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    doAction(btn.dataset.act, Number(btn.dataset.id));
+  });
+  tbody.addEventListener("change", function (e) {
+    var cb = e.target.closest(".row-check");
+    if (!cb) return;
+    var id = Number(cb.dataset.id);
+    if (cb.checked) selected[id] = true;
+    else delete selected[id];
+    renderBatchBar();
+    var list = filtered();
+    var rows = list.slice((page - 1) * pageSize, page * pageSize);
+    var pageIds = rows.map(function (q) { return q.id; });
+    document.getElementById("check-all").checked = pageIds.length > 0 && pageIds.every(function (x) { return selected[x]; });
+  });
+  document.getElementById("check-all").addEventListener("change", function () {
+    var list = filtered();
+    var rows = list.slice((page - 1) * pageSize, page * pageSize);
+    rows.forEach(function (q) {
+      if (this.checked) selected[q.id] = true;
+      else delete selected[q.id];
+    }, this);
+    render();
+  });
+
+  /* ---------- 筛选事件（实时过滤，变更后页码回第 1 页） ---------- */
+  document.getElementById("f-q").addEventListener("input", UI.debounce(function () {
+    filters.q = this.value; page = 1; render();
+  }, 300));
+  [{ id: "f-stage", key: "stageId" }, { id: "f-type", key: "type" },
+   { id: "f-diff", key: "difficulty" }, { id: "f-status", key: "status" }].forEach(function (f) {
+    document.getElementById(f.id).addEventListener("change", function () {
+      filters[f.key] = this.value;
+      page = 1;
+      render();
+    });
+  });
+
+  /* ---------- 弹窗事件 ---------- */
+  document.getElementById("add-q-btn").addEventListener("click", function () { openQModal(null); });
+  document.getElementById("q-save-btn").addEventListener("click", saveQuestion);
+  document.getElementById("qf-type").addEventListener("change", function () {
+    var t = this.value;
+    if ((t === "single" || t === "multi") && qf.opts.length < 2) {
+      qf.opts = [{ text: "", correct: false }, { text: "", correct: false }, { text: "", correct: false }, { text: "", correct: false }];
+    }
+    if (t === "single") {
+      var seen = false;
+      qf.opts.forEach(function (o) {
+        if (o.correct) { if (seen) o.correct = false; else seen = true; }
+      });
+    }
+    renderOpts();
+    toggleAnswerAreas();
+  });
+  document.getElementById("qf-opts").addEventListener("input", function (e) {
+    var inp = e.target.closest("input[data-opt-text]");
+    if (!inp) return;
+    qf.opts[Number(inp.dataset.optText)].text = inp.value;
+  });
+  document.getElementById("qf-opts").addEventListener("change", function (e) {
+    var input = e.target.closest("input[data-i]");
+    if (!input || input.hasAttribute("data-opt-text")) return;
+    var i = Number(input.dataset.i);
+    var type = document.getElementById("qf-type").value;
+    if (type === "single") {
+      qf.opts.forEach(function (o, k) { o.correct = k === i; });
+      renderOpts();
+    } else {
+      qf.opts[i].correct = input.checked;
+    }
+  });
+  document.getElementById("qf-opts").addEventListener("click", function (e) {
+    var btn = e.target.closest('[data-act="opt-del"]');
+    if (!btn || btn.disabled) return;
+    qf.opts.splice(Number(btn.dataset.i), 1);
+    renderOpts();
+  });
+  document.getElementById("qf-add-opt").addEventListener("click", function () {
+    if (qf.opts.length >= 6) return;
+    qf.opts.push({ text: "", correct: false });
+    renderOpts();
+  });
+  document.getElementById("q-detail-ops").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    doAction(btn.dataset.act, Number(btn.dataset.id));
+  });
+
+  /* ---------- 导出 / 导入 ---------- */
+  document.getElementById("export-btn").addEventListener("click", function () {
+    UI.toast("已按当前筛选导出 Excel（原型模拟）");
+  });
+
+  var IMPORT_ROWS = [
+    { subjectName: "AI应用与智能体开发", stageName: "Prompt 工程", type: "single", difficulty: "easy",
+      title: "在 Prompt 工程中，「Zero-shot」指的是？",
+      options: ["不提供任何示例直接让模型完成任务", "提供少量输入输出示例", "对模型进行全参数微调", "限制模型输出长度"],
+      answer: "A", analysis: "Zero-shot 即零样本提示，不提供示例直接下达任务；提供少量示例称为 Few-shot。", tags: "Prompt,Zero-shot" },
+    { subjectName: "AI大模型开发", stageName: "推理与部署", type: "multi", difficulty: "medium",
+      title: "模型服务化部署的常见方式有哪些？（多选）",
+      options: ["REST API 服务", "gRPC 服务", "批量离线推理", "修改训练集标签"],
+      answer: "ABC", analysis: "服务化部署常见方式包括 REST / gRPC 在线服务与批量离线推理；修改训练集标签不属于部署方式。", tags: "部署" },
+    { subjectName: "AI运维", stageName: "容器与 K8s", type: "judge", difficulty: "easy",
+      title: "Kubernetes 中的 Pod 是最小调度单位。",
+      options: [], answer: "T", analysis: "Pod 是 Kubernetes 中最小的可调度与部署单元。", tags: "K8s" },
+    { subjectName: "AI测试", stageName: "AI 专项测试", type: "short", difficulty: "medium",
+      title: "请简述提示词注入攻击的原理与常见防御手段。",
+      options: [], answer: "通过构造恶意输入劫持模型行为；防御包括输入清洗、权限隔离、输出过滤与系统提示加固。",
+      analysis: "提示词注入通过在输入中夹带指令覆盖系统提示；防御需多层：输入清洗、工具权限隔离、输出过滤与系统提示加固。", tags: "安全,提示注入" },
+    { subjectName: "AI视觉设计", stageName: "AIGC 绘图", type: "single", difficulty: "easy",
+      title: "下列哪个模型属于文生图模型？",
+      options: ["Whisper", "Stable Diffusion", "BERT", "YOLO"],
+      answer: "B", analysis: "Stable Diffusion 是主流文生图扩散模型；Whisper 是语音识别，BERT 是文本理解，YOLO 是目标检测。", tags: "AIGC" },
+    { subjectName: "AI应用与智能体开发", stageName: "Agent 开发", type: "short", difficulty: "hard",
+      title: "请简述 Function Calling 的工作流程。",
+      options: [], answer: "模型根据用户请求决定调用的函数与参数，生成结构化调用；宿主执行函数后将结果回传模型；模型结合结果生成最终回答。",
+      analysis: "Function Calling 由「模型决策 → 宿主执行 → 结果回传 → 模型总结」四步组成。", tags: "Agent,Function Calling" }
+  ];
+
+  function showImportPreview(fileName) {
+    var html =
+      '<div class="alert alert-info" style="margin-bottom:12px">解析完成（原型模拟）：' + esc(fileName || "示例文件.xlsx") + "</div>" +
+      "<div><b>共 " + IMPORT_ROWS.length + " 行：全部校验通过，将新增 " + IMPORT_ROWS.length + " 道题目（状态：待审核）</b></div>" +
+      '<div class="table-wrap mt-16"><table class="table"><thead><tr>' +
+        "<th>学科</th><th>阶段</th><th>题干</th><th>题型</th><th>难度</th><th>结果</th>" +
+      "</tr></thead><tbody>" +
+      IMPORT_ROWS.map(function (r) {
+        return "<tr><td class=\"nowrap\">" + esc(r.subjectName) + "</td><td class=\"nowrap\">" + esc(r.stageName) +
+          '</td><td style="max-width:240px"><div class="nowrap" style="overflow:hidden;text-overflow:ellipsis">' + esc(r.title) + "</div></td>" +
+          '<td class="nowrap">' + esc(typeLabel[r.type]) + '</td><td class="nowrap">' + esc(diffLabel[r.difficulty]) +
+          '</td><td><span class="badge badge-green">新增</span></td></tr>';
+      }).join("") +
+      "</tbody></table></div>";
+    var host = document.getElementById("import-preview");
+    host.innerHTML = html;
+    host.hidden = false;
+    document.getElementById("import-confirm-btn").disabled = false;
+  }
+
+  function applyImport() {
+    var maxId = nextId();
+    IMPORT_ROWS.forEach(function (r, i) {
+      var si = null;
+      for (var k = 0; k < subjects.length && !si; k++) {
+        for (var j = 0; j < subjects[k].stages.length; j++) {
+          if (subjects[k].name === r.subjectName && subjects[k].stages[j].name === r.stageName) {
+            si = { subjectId: subjects[k].id, stageId: subjects[k].stages[j].id };
+            break;
+          }
+        }
+      }
+      if (!si) return;
+      var q = {
+        id: maxId + i, subjectId: si.subjectId, stageId: si.stageId,
+        type: r.type, difficulty: r.difficulty, title: r.title,
+        options: r.type === "single" || r.type === "multi"
+          ? r.options.map(function (t, k) { return { key: "ABCDEF"[k], text: t }; })
+          : (r.type === "judge" ? [{ key: "T", text: "正确" }, { key: "F", text: "错误" }] : []),
+        answer: r.type === "short" ? "" : r.answer,
+        analysis: r.analysis,
+        tags: r.tags.split(/[,，]/).map(function (t) { return t.trim(); }).filter(Boolean),
+        done: 0, accuracy: 0,
+        status: "pending",
+        createdAt: UI.fmtDateTime(new Date())
+      };
+      if (r.type === "short") q.refAnswer = r.answer;
+      questions.unshift(q);
+    });
+    UI.closeModal("import-modal");
+    UI.toast("导入成功：共导入 " + IMPORT_ROWS.length + " 道题目（已转入待审核）");
+    page = 1;
+    render();
+    resetImportModal();
+  }
+
+  function resetImportModal() {
+    document.getElementById("import-preview").hidden = true;
+    document.getElementById("import-preview").innerHTML = "";
+    document.getElementById("import-confirm-btn").disabled = true;
+    document.getElementById("import-file-name").textContent = "尚未选择文件";
+    document.getElementById("import-file").value = "";
+  }
+
+  function downloadTemplate() {
+    var rows = [
+      ["学科", "阶段", "题干", "题型", "难度", "选项A", "选项B", "选项C", "选项D", "选项E", "选项F", "正确答案", "解析", "标签"],
+      ["AI应用与智能体开发", "大模型基础", "下列关于大语言模型（LLM）的描述，正确的是？", "单选", "简单",
+        "LLM 只能处理英文文本", "LLM 通过海量文本预训练学习语言规律", "LLM 的参数量越小效果一定越好", "LLM 不需要任何微调即可用于所有场景", "", "",
+        "B", "大语言模型通过海量文本预训练学习语言规律。", "大模型,基础概念"],
+      ["AI应用与智能体开发", "Agent 开发", "以下哪些属于 AI Agent 的核心组成部分？（多选）", "多选", "中等",
+        "规划（Planning）", "记忆（Memory）", "工具使用（Tool Use）", "硬盘分区", "", "",
+        "ABC", "Agent 通常由规划、记忆、工具使用与大模型核心组成。", "Agent"],
+      ["AI应用与智能体开发", "大模型基础", "Token 是大模型处理文本的最小单位，一个汉字一定只对应一个 Token。", "判断", "简单",
+        "", "", "", "", "", "", "错误", "一个汉字可能对应一个或多个 Token。", "Token"],
+      ["AI应用与智能体开发", "项目实战", "请简述 RAG（检索增强生成）的原理，并说明它解决了大模型的哪些问题。", "简答", "困难",
+        "", "", "", "", "", "",
+        "RAG 在生成前先从外部知识库检索相关片段并注入上下文，缓解幻觉、知识过时与私有知识缺失问题。",
+        "RAG = 检索 + 注入 + 生成。", "RAG,项目实战"]
+    ];
+    var csv = rows.map(function (r) {
+      return r.map(function (c) {
+        c = String(c);
+        return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+      }).join(",");
+    }).join("\r\n");
+    /* 带 BOM，Excel 打开 CSV 中文不乱码 */
+    var blob = new Blob([String.fromCharCode(0xFEFF) + csv], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "题库-导入模板.csv";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    UI.toast("导入模板已下载");
+  }
+
+  document.getElementById("import-btn").addEventListener("click", function () {
+    resetImportModal();
+    UI.openModal("import-modal");
+  });
+  document.getElementById("import-drop").addEventListener("click", function (e) {
+    if (e.target.closest("label")) return;
+    document.getElementById("import-file").click();
+  });
+  ["dragenter", "dragover"].forEach(function (ev) {
+    document.getElementById("import-drop").addEventListener(ev, function (e) {
+      e.preventDefault();
+      this.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    document.getElementById("import-drop").addEventListener(ev, function (e) {
+      e.preventDefault();
+      this.classList.remove("dragover");
+    });
+  });
+  document.getElementById("import-drop").addEventListener("drop", function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    document.getElementById("import-file-name").textContent = "已选择文件：" + (f ? f.name : "（未知文件）") + "（原型模拟解析）";
+    showImportPreview(f ? f.name : "");
+  });
+  document.getElementById("import-file").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    document.getElementById("import-file-name").textContent = "已选择文件：" + (f ? f.name : "（未知文件）") + "（原型模拟解析）";
+    showImportPreview(f ? f.name : "");
+  });
+  document.getElementById("import-confirm-btn").addEventListener("click", function () {
+    UI.confirm({ title: "确认导入", text: "确认后将新增 " + IMPORT_ROWS.length + " 道题目并转入待审核。确定导入吗？", okText: "确认导入" })
+      .then(function (ok) { if (ok) applyImport(); });
+  });
+  document.getElementById("download-tpl-btn").addEventListener("click", downloadTemplate);
+
+  render();
+})();
+</script>
+</body>
+</html>

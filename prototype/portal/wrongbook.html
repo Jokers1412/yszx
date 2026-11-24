@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>错题本 · 云枢智学</title>
+<link rel="stylesheet" href="../assets/css/base.css">
+<link rel="stylesheet" href="../assets/css/portal.css">
+<style>
+  .wb-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .wrong-filter-bar .select { width: auto; min-width: 132px; }
+  .wrong-filter-bar .fb-label { font-size: 13px; color: var(--ink-3); white-space: nowrap; }
+  .wrong-filter-bar .fb-group { display: flex; align-items: center; gap: 8px; }
+  .w-ans-wrong { color: var(--danger-text); }
+  .w-ans-right { color: var(--success-text); }
+  .redo-wrap { max-width: 780px; margin: 0 auto; }
+  .redo-wrap .question-panel { padding: 28px 32px; }
+  @media (max-width: 900px) {
+    .wb-stats { grid-template-columns: repeat(2, 1fr); }
+    .top3-strip { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body data-page="wrongbook">
+<header id="site-header"></header>
+
+<div class="container" style="padding:24px 24px 64px">
+
+  <!-- ============ 浏览模式 ============ -->
+  <div id="browse-view">
+    <h1 style="font-size:22px" class="mb-16">错题本</h1>
+
+    <!-- 统计卡 -->
+    <div class="wb-stats" id="stat-row"></div>
+
+    <!-- 高频错题 Top3 -->
+    <div class="flex-between mb-8">
+      <h3 style="margin:0;font-size:16px">高频错题 Top3</h3>
+      <span class="muted" style="font-size:12px">按错误次数降序 · 点击卡片进入重做并定位该题</span>
+    </div>
+    <div class="top3-strip" id="top3-strip"></div>
+
+    <!-- 筛选栏 -->
+    <div class="wrong-filter-bar">
+      <div class="fb-group">
+        <span class="fb-label">状态</span>
+        <div class="chip-row" id="status-chips">
+          <button class="chip active" data-status="all">全部</button>
+          <button class="chip" data-status="pending">待复习</button>
+          <button class="chip" data-status="mastered">已掌握</button>
+        </div>
+      </div>
+      <div class="fb-group">
+        <span class="fb-label">分类</span>
+        <select class="select" id="f-category"></select>
+      </div>
+      <div class="fb-group">
+        <span class="fb-label">时间</span>
+        <select class="select" id="f-time">
+          <option value="all">全部</option>
+          <option value="7">近 7 天</option>
+          <option value="30">近 30 天</option>
+        </select>
+      </div>
+      <div class="fb-group">
+        <span class="fb-label">排序</span>
+        <select class="select" id="f-sort">
+          <option value="recent">最近答错时间倒序</option>
+          <option value="count">错误次数倒序</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 错题列表 -->
+    <div id="wrong-list"></div>
+
+    <!-- 批量操作条 -->
+    <div class="batch-bar hidden" id="batch-bar">
+      <span class="batch-count" id="batch-count">已选择 0 项</span>
+      <button class="btn btn-sm" data-batch="master">批量标记已掌握</button>
+      <button class="btn btn-danger btn-sm" data-batch="remove">批量移除</button>
+      <button class="btn btn-ghost btn-sm" data-batch="clear">取消选择</button>
+    </div>
+  </div>
+
+  <!-- ============ 重做模式 ============ -->
+  <div id="redo-view" class="hidden">
+    <div class="redo-wrap">
+      <div class="flex-between mb-16">
+        <h2 id="redo-title" style="margin:0;font-size:20px">重做模式</h2>
+      </div>
+      <div class="card question-panel" id="redo-question"></div>
+      <div class="practice-footer-actions">
+        <button class="btn" id="rb-prev">上一题</button>
+        <button class="btn btn-primary" id="rb-next">下一题</button>
+        <button class="btn btn-ghost" id="rb-exit">退出练习</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer id="site-footer"></footer>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/portal.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 常量与解析文案（解析为原型自拟） ---------- */
+  var TODAY = "2026-11-19";           // 原型口径「今天」
+  var CORRECT_TARGET = 3;             // 累计纠正 3 次自动掌握
+
+  var ANALYSIS = {
+    "w-1": "抑制幻觉的关键是让模型「知之为知之」：在提示词中明确要求不确定时承认不知道并给出依据来源，能显著减少编造；输出越长反而越容易出现幻觉，删除系统提示、温度调到 2.0 都会降低可控性。故选 A。",
+    "w-2": "AI Agent 的核心组成包括规划（Planning）、记忆（Memory）与工具使用（Tool Use），大模型作为核心推理引擎；硬盘分区属于操作系统概念，与 Agent 无关。本题为多选题，正确答案 ABC，注意不要漏选。",
+    "w-3": "LoRA、Prompt Tuning、Adapter 都只训练少量新增参数，属于参数高效微调（PEFT）；全参数预训练既不是微调手段，成本也极高。本题为多选题，正确答案 ABD。",
+    "w-4": "Token 的切分由分词器（Tokenizer）与语料共同决定：一个汉字可能对应一个 Token，也可能被拆成多个 Token，甚至多个汉字共用一个 Token，因此「一个汉字一定只对应一个 Token」的表述错误，应选「错误」。",
+    "w-5": "正运动学（Forward Kinematics）由各关节角度推算末端执行器的位置与姿态；由目标位姿反解关节角度的是反运动学（IK）。故选 A。",
+    "w-6": "RAG（检索增强生成）在生成前先从外部知识库检索与问题相关的文档片段，将其作为上下文注入 Prompt，再由大模型生成答案。它解决了：① 知识截止日期问题（可接入实时更新的资料）；② 幻觉问题（生成有据可依）；③ 领域私有知识缺失（无需重新训练即可使用企业内部资料）。",
+    "w-7": "大模型应用的测试重点是输出质量（幻觉、事实一致性）、安全（提示注入、越狱）与非功能指标（响应延迟、稳定性）；界面像素对齐属于 UI 还原范畴。本题正确答案 ABC，多选题少选、多选均不得分。",
+    "w-8": "Deployment 通过 ReplicaSet 维持期望的 Pod 副本数，Pod 异常退出或节点故障时会自动重建，因此该描述正确，应选「正确」。"
+  };
+
+  /* ---------- 页面状态（内存态，刷新恢复初始） ---------- */
+  var state = {
+    status: "all",      // all | pending | mastered
+    category: "all",
+    time: "all",        // all | 7 | 30
+    sort: "recent",     // recent | count
+    selected: {},       // 勾选集合 id -> true
+    redo: null          // { list, idx, answers: { id -> { selected, submitted, correct } } }
+  };
+
+  /* ---------- 工具 ---------- */
+  function byId(id) {
+    for (var i = 0; i < DB.wrongList.length; i++) {
+      if (DB.wrongList[i].id === id) return DB.wrongList[i];
+    }
+    return null;
+  }
+  function parseDay(s) { return new Date(String(s).replace(/-/g, "/") + " 00:00:00"); }
+  var TODAY_MS = parseDay(TODAY).getTime();
+  function daysFromToday(dateStr) {
+    return (TODAY_MS - parseDay(dateStr).getTime()) / 86400000;
+  }
+  function levelBadge(w) {
+    if (w.wrongCount >= 3) return '<span class="badge badge-red">高频易错</span>';
+    if (w.wrongCount === 2) return '<span class="badge badge-orange">多次错误</span>';
+    return '<span class="badge badge-gray">偶尔错误</span>';
+  }
+  /* 正确答案归一化为选项 key（判断题数据存「正确/错误」文本） */
+  function rightKeysOf(w) {
+    var r = w.rightAnswer;
+    if (r === "正确") r = "T";
+    if (r === "错误") r = "F";
+    return String(r).split("");
+  }
+  function sortList(list) {
+    return list.slice().sort(function (a, b) {
+      if (state.sort === "count") {
+        if (b.wrongCount !== a.wrongCount) return b.wrongCount - a.wrongCount;
+        return String(b.lastWrong || "").localeCompare(String(a.lastWrong || ""));
+      }
+      var c = String(b.lastWrong || "").localeCompare(String(a.lastWrong || ""));
+      if (c !== 0) return c;
+      return b.wrongCount - a.wrongCount;
+    });
+  }
+  function filteredList() {
+    var list = DB.wrongList.filter(function (w) {
+      if (state.status === "pending" && w.mastered) return false;
+      if (state.status === "mastered" && !w.mastered) return false;
+      if (state.category !== "all" && w.category !== state.category) return false;
+      if (state.time === "7" && !(daysFromToday(w.lastWrong) < 7)) return false;
+      if (state.time === "30" && !(daysFromToday(w.lastWrong) < 30)) return false;
+      return true;
+    });
+    return sortList(list);
+  }
+  function pendingList() {
+    return sortList(DB.wrongList.filter(function (w) { return !w.mastered; }));
+  }
+
+  /* ---------- 统计卡 ---------- */
+  function renderStats() {
+    var total = DB.wrongList.length;
+    var mastered = 0, pending = 0;
+    DB.wrongList.forEach(function (w) { if (w.mastered) mastered++; else pending++; });
+    var rate = total ? Math.round(mastered / total * 1000) / 10 : 0;
+    var cards = [
+      { label: "错题总数", value: String(total), sub: "全部错题记录" },
+      { label: "待复习", value: String(pending), sub: "尚未掌握，需继续巩固" },
+      { label: "已掌握", value: String(mastered), sub: "已连续纠正 3 次或手动标记" },
+      { label: "掌握率", value: rate + "%", sub: "已掌握 / 错题总数" }
+    ];
+    document.getElementById("stat-row").innerHTML = cards.map(function (c) {
+      return '<div class="card stat-card">' +
+        '<div class="stat-label">' + c.label + "</div>" +
+        '<div class="stat-value">' + UI.esc(c.value) + "</div>" +
+        '<div class="stat-sub">' + UI.esc(c.sub) + "</div>" +
+        "</div>";
+    }).join("");
+  }
+
+  /* ---------- 高频错题 Top3 ---------- */
+  function renderTop3() {
+    var host = document.getElementById("top3-strip");
+    var top = pendingList().slice().sort(function (a, b) {
+      if (b.wrongCount !== a.wrongCount) return b.wrongCount - a.wrongCount;
+      return String(b.lastWrong || "").localeCompare(String(a.lastWrong || ""));
+    }).slice(0, 3);
+    if (!top.length) {
+      host.innerHTML = '<div class="empty-state card" style="grid-column:1/-1;padding:24px"><div class="empty-title">暂无待复习的高频错题</div></div>';
+      return;
+    }
+    host.innerHTML = top.map(function (w, i) {
+      return '<div class="card top3-card" data-jump="' + w.id + '" title="点击进入重做模式并定位该题">' +
+        '<div class="flex-between">' +
+        '  <span class="t3-rank badge badge-red">TOP ' + (i + 1) + "</span>" +
+        '  <span class="muted" style="font-size:12px">错误 ' + w.wrongCount + " 次</span>" +
+        "</div>" +
+        '<div class="t3-stem">' + UI.esc(w.title) + "</div>" +
+        "</div>";
+    }).join("");
+  }
+
+  /* ---------- 筛选控件（分类选项去重重建，保留当前选择） ---------- */
+  function renderFilters() {
+    var seen = {}, cats = [];
+    DB.wrongList.forEach(function (w) {
+      if (!seen[w.category]) { seen[w.category] = 1; cats.push(w.category); }
+    });
+    if (state.category !== "all" && !seen[state.category]) state.category = "all";
+    var sel = document.getElementById("f-category");
+    sel.innerHTML = '<option value="all">全部分类</option>' + cats.map(function (c) {
+      return '<option value="' + UI.esc(c) + '">' + UI.esc(c) + "</option>";
+    }).join("");
+    sel.value = state.category;
+    document.getElementById("f-time").value = state.time;
+    document.getElementById("f-sort").value = state.sort;
+  }
+
+  /* ---------- 错题列表 ---------- */
+  function renderList() {
+    var host = document.getElementById("wrong-list");
+    var list = filteredList();
+    if (!list.length) {
+      host.innerHTML =
+        '<div class="empty-state card">' +
+        '  <div class="empty-icon">📭</div>' +
+        '  <div class="empty-title">暂无错题</div>' +
+        '  <div class="empty-sub">调整筛选条件，或去刷题积累错题后再来看看</div>' +
+        "</div>";
+      return;
+    }
+    host.innerHTML = list.map(function (w) {
+      return '<div class="card wrong-card' + (w.mastered ? " mastered" : "") + '" data-id="' + w.id + '">' +
+        '<label class="checkbox-row"><input type="checkbox" data-check="' + w.id + '"' +
+          (state.selected[w.id] ? " checked" : "") + "></label>" +
+        '<div class="w-body">' +
+        '  <div class="flex gap-8 mb-8" style="align-items:center">' +
+             levelBadge(w) +
+        '    <span class="badge">已纠正 ' + w.corrected + "/3 次</span>" +
+             (w.mastered ? '<span class="badge badge-green">已掌握</span>' : "") +
+        "  </div>" +
+        '  <div class="w-stem">' + UI.esc(w.title) + "</div>" +
+        '  <div class="w-info">' +
+        "    <span>分类：" + UI.esc(w.category) + "</span>" +
+        "    <span>最近答错：" + UI.esc(w.lastWrong) + "</span>" +
+        "    <span>错误次数：" + w.wrongCount + " 次</span>" +
+        "  </div>" +
+        '  <div class="w-answers">' +
+        '    <span class="w-ans-wrong">你的答案：' + UI.esc(w.myAnswer) + "</span>" +
+        '    <span class="w-ans-right">正确答案：' + UI.esc(w.rightAnswer) + "</span>" +
+        "  </div>" +
+        '  <div class="w-actions">' +
+        '    <button class="btn btn-primary btn-sm" data-act="redo">重新做题</button>' +
+        (w.mastered ? "" : '<button class="btn btn-sm" data-act="master">标记已掌握</button>') +
+        '    <button class="btn btn-soft-danger btn-sm" data-act="remove">移除错题</button>' +
+        "  </div>" +
+        "</div>" +
+        "</div>";
+    }).join("");
+  }
+
+  /* ---------- 批量操作条 ---------- */
+  function selectedIds() {
+    return Object.keys(state.selected).filter(function (id) { return state.selected[id]; });
+  }
+  function updateBatchBar() {
+    var ids = selectedIds();
+    var bar = document.getElementById("batch-bar");
+    if (ids.length) {
+      bar.classList.remove("hidden");
+      document.getElementById("batch-count").textContent = "已选择 " + ids.length + " 项";
+    } else {
+      bar.classList.add("hidden");
+    }
+  }
+  function clearSelection() {
+    state.selected = {};
+    UI.$$("#wrong-list input[type=checkbox]").forEach(function (cb) { cb.checked = false; });
+    updateBatchBar();
+  }
+
+  /* ---------- 浏览模式整体刷新 ---------- */
+  function renderBrowse() {
+    renderStats();
+    renderTop3();
+    renderFilters();
+    renderList();
+    updateBatchBar();
+  }
+
+  /* ---------- 重做模式 ---------- */
+  function startRedo(focusId) {
+    var list = pendingList();
+    var idx = 0;
+    if (focusId) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === focusId) { idx = i; break; }
+      }
+    }
+    state.redo = { list: list, idx: idx, answers: {} };
+    document.getElementById("browse-view").classList.add("hidden");
+    document.getElementById("redo-view").classList.remove("hidden");
+    renderRedoQuestion();
+  }
+  function exitRedo() {
+    state.redo = null;
+    document.getElementById("redo-view").classList.add("hidden");
+    document.getElementById("browse-view").classList.remove("hidden");
+    renderBrowse();
+    UI.toast("已退出重做模式");
+  }
+  function currentRedoItem() {
+    return state.redo.list[state.redo.idx];
+  }
+  function renderRedoQuestion() {
+    var r = state.redo;
+    var host = document.getElementById("redo-question");
+    var titleEl = document.getElementById("redo-title");
+    var prevBtn = document.getElementById("rb-prev");
+    var nextBtn = document.getElementById("rb-next");
+    var exitBtn = document.getElementById("rb-exit");
+
+    if (!r || !r.list.length) {
+      titleEl.textContent = "重做模式";
+      host.innerHTML =
+        '<div class="empty-state">' +
+        '  <div class="empty-icon">🎉</div>' +
+        '  <div class="empty-title">没有待复习的错题</div>' +
+        '  <div class="empty-sub">所有错题都已掌握，去题库继续练习吧</div>' +
+        "</div>" +
+        '<div class="text-center mt-16"><button class="btn btn-primary" id="rb-back">返回浏览</button></div>';
+      prevBtn.classList.add("hidden");
+      nextBtn.classList.add("hidden");
+      exitBtn.classList.add("hidden");
+      return;
+    }
+    prevBtn.classList.remove("hidden");
+    nextBtn.classList.remove("hidden");
+    exitBtn.classList.remove("hidden");
+
+    var w = r.list[r.idx];
+    var ans = r.answers[w.id];
+    if (!ans) ans = r.answers[w.id] = { selected: [], submitted: false, correct: false };
+
+    titleEl.textContent = "重做模式 · 第 " + (r.idx + 1) + "/" + r.list.length + " 题";
+
+    var html =
+      '<div class="q-type-row">' +
+      '  <span class="badge badge-blue">' + UI.esc(DB.typeLabel[w.type] || w.type) + "</span>" +
+        levelBadge(w) +
+      '  <span class="badge">已纠正 ' + w.corrected + "/3 次</span>" +
+      "</div>" +
+      '<div class="q-stem-lg">' + UI.esc(w.title) + "</div>";
+
+    if (!w.hasOptions) {
+      html +=
+        '<div class="alert alert-info">此题暂无可选的答题选项，请自行复习</div>' +
+        '<div class="analysis-card">' +
+        "  <h4>参考答案</h4>" +
+        '  <p>正确答案：<strong class="w-ans-right">' + UI.esc(w.rightAnswer) + "</strong></p>" +
+        '  <p class="mb-0 text-2">' + UI.esc(ANALYSIS[w.id] || "") + "</p>" +
+        "</div>";
+    } else {
+      var keys = rightKeysOf(w);
+      html += '<div class="opt-list">';
+      w.options.forEach(function (o) {
+        var cls = "opt-item";
+        if (ans.submitted) {
+          cls += " locked";
+          if (keys.indexOf(o.key) >= 0) cls += " correct";
+          else if (ans.selected.indexOf(o.key) >= 0) cls += " wrong";
+        } else if (ans.selected.indexOf(o.key) >= 0) {
+          cls += " selected";
+        }
+        html +=
+          '<div class="' + cls + '" data-key="' + o.key + '">' +
+          '  <span class="opt-key">' + o.key + "</span>" +
+          "  <span>" + UI.esc(o.text) + "</span>" +
+          "</div>";
+      });
+      html += "</div>";
+      if (!ans.submitted) {
+        html += '<button class="btn btn-primary" id="rb-submit">提交答案</button>';
+      } else {
+        html +=
+          '<div class="analysis-card">' +
+          "  <h4>答案解析 " +
+          '    <span class="badge ' + (ans.correct ? 'badge-green">回答正确' : 'badge-red">回答错误') + "</span>" +
+          "  </h4>" +
+          "  <p>正确答案：<strong class=\"w-ans-right\">" + UI.esc(w.rightAnswer) + "</strong></p>" +
+          '  <p class="mb-0 text-2">' + UI.esc(ANALYSIS[w.id] || "") + "</p>" +
+          "</div>";
+      }
+    }
+    host.innerHTML = html;
+    prevBtn.disabled = r.idx === 0;
+    nextBtn.disabled = r.idx >= r.list.length - 1;
+  }
+
+  function submitRedoAnswer() {
+    var r = state.redo;
+    var w = currentRedoItem();
+    var ans = r.answers[w.id];
+    if (!ans || ans.submitted) return;
+    if (!ans.selected.length) { UI.toast("请先选择答案", "warn"); return; }
+
+    var keys = rightKeysOf(w);
+    var ok;
+    if (w.type === "multi") {
+      ok = ans.selected.length === keys.length && ans.selected.every(function (k) {
+        return keys.indexOf(k) >= 0;
+      });
+    } else {
+      ok = ans.selected.length === 1 && keys.indexOf(ans.selected[0]) >= 0;
+    }
+    ans.submitted = true;
+    ans.correct = ok;
+
+    if (ok) {
+      w.corrected += 1;
+      UI.toast("回答正确！已纠正次数 +1（" + w.corrected + "/" + CORRECT_TARGET + "）");
+      if (w.corrected >= CORRECT_TARGET && !w.mastered) {
+        w.mastered = true;
+        UI.toast("已连续纠正 3 次，自动标记为已掌握");
+      }
+    } else {
+      UI.toast("回答错误，查看解析后再接再厉", "warn");
+    }
+    renderRedoQuestion();
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  function bindEvents() {
+    /* 状态 chip 单选 */
+    document.getElementById("status-chips").addEventListener("click", function (e) {
+      var chip = e.target.closest("[data-status]");
+      if (!chip) return;
+      state.status = chip.dataset.status;
+      UI.$$("#status-chips .chip").forEach(function (c) {
+        c.classList.toggle("active", c === chip);
+      });
+      renderList();
+      updateBatchBar();
+    });
+
+    /* 分类 / 时间 / 排序 */
+    document.getElementById("f-category").addEventListener("change", function () {
+      state.category = this.value; renderList(); updateBatchBar();
+    });
+    document.getElementById("f-time").addEventListener("change", function () {
+      state.time = this.value; renderList(); updateBatchBar();
+    });
+    document.getElementById("f-sort").addEventListener("change", function () {
+      state.sort = this.value; renderList(); updateBatchBar();
+    });
+
+    /* Top3 卡片 → 重做模式并定位 */
+    document.getElementById("top3-strip").addEventListener("click", function (e) {
+      var card = e.target.closest("[data-jump]");
+      if (card) startRedo(card.dataset.jump);
+    });
+
+    /* 列表：勾选 */
+    document.getElementById("wrong-list").addEventListener("change", function (e) {
+      var cb = e.target.closest("input[data-check]");
+      if (!cb) return;
+      if (cb.checked) state.selected[cb.dataset.check] = true;
+      else delete state.selected[cb.dataset.check];
+      updateBatchBar();
+    });
+
+    /* 列表：单卡操作 */
+    document.getElementById("wrong-list").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-act]");
+      if (!btn) return;
+      var card = btn.closest("[data-id]");
+      var w = byId(card.dataset.id);
+      if (!w) return;
+      var act = btn.dataset.act;
+
+      if (act === "redo") { startRedo(w.id); return; }
+
+      if (act === "master") {
+        UI.confirm({ title: "标记已掌握", text: "确定将该错题标记为已掌握吗？", okText: "标记已掌握" }).then(function (ok) {
+          if (!ok) return;
+          w.mastered = true;
+          UI.toast("已标记为已掌握");
+          renderBrowse();
+        });
+        return;
+      }
+
+      if (act === "remove") {
+        UI.confirm({ title: "移除错题", text: "确定将该题从错题本移除吗？移除后可在刷题中重新积累。", okText: "移除", danger: true }).then(function (ok) {
+          if (!ok) return;
+          var idx = DB.wrongList.indexOf(w);
+          if (idx >= 0) DB.wrongList.splice(idx, 1);
+          delete state.selected[w.id];
+          UI.toast("已移除错题");
+          renderBrowse();
+        });
+      }
+    });
+
+    /* 批量操作 */
+    document.getElementById("batch-bar").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-batch]");
+      if (!btn) return;
+      var ids = selectedIds();
+      if (!ids.length) { UI.toast("请先勾选需要操作的错题", "warn"); return; }
+      var act = btn.dataset.batch;
+
+      if (act === "master") {
+        UI.confirm({ title: "批量标记已掌握", text: "确定将选中的 " + ids.length + " 道错题标记为已掌握吗？", okText: "批量标记" }).then(function (ok) {
+          if (!ok) return;
+          ids.forEach(function (id) { var w = byId(id); if (w) w.mastered = true; });
+          UI.toast("已批量标记 " + ids.length + " 项为已掌握");
+          clearSelection();
+          renderBrowse();
+        });
+        return;
+      }
+
+      if (act === "remove") {
+        UI.confirm({ title: "批量移除", text: "确定移除选中的 " + ids.length + " 道错题吗？移除后可在刷题中重新积累。", okText: "批量移除", danger: true }).then(function (ok) {
+          if (!ok) return;
+          ids.forEach(function (id) {
+            var w = byId(id);
+            if (!w) return;
+            var idx = DB.wrongList.indexOf(w);
+            if (idx >= 0) DB.wrongList.splice(idx, 1);
+          });
+          UI.toast("已批量移除 " + ids.length + " 道错题");
+          clearSelection();
+          renderBrowse();
+        });
+        return;
+      }
+
+      if (act === "clear") {
+        UI.confirm({ title: "取消选择", text: "确定取消已勾选的 " + ids.length + " 项吗？", okText: "取消选择" }).then(function (ok) {
+          if (!ok) return;
+          clearSelection();
+          UI.toast("已取消选择");
+        });
+      }
+    });
+
+    /* 重做模式：题目区交互 */
+    document.getElementById("redo-question").addEventListener("click", function (e) {
+      if (e.target.closest("#rb-back")) { exitRedo(); return; }
+      if (e.target.closest("#rb-submit")) { submitRedoAnswer(); return; }
+      var opt = e.target.closest(".opt-item");
+      if (!opt) return;
+      var r = state.redo;
+      if (!r || !r.list.length) return;
+      var w = currentRedoItem();
+      var ans = r.answers[w.id];
+      if (ans.submitted) return;
+      var key = opt.dataset.key;
+      if (w.type === "multi") {
+        var i = ans.selected.indexOf(key);
+        if (i >= 0) ans.selected.splice(i, 1);
+        else ans.selected.push(key);
+      } else {
+        ans.selected = [key];
+      }
+      renderRedoQuestion();
+    });
+
+    /* 重做模式：底部按钮 */
+    document.getElementById("rb-prev").addEventListener("click", function () {
+      var r = state.redo;
+      if (!r || r.idx <= 0) return;
+      r.idx -= 1;
+      renderRedoQuestion();
+    });
+    document.getElementById("rb-next").addEventListener("click", function () {
+      var r = state.redo;
+      if (!r || r.idx >= r.list.length - 1) return;
+      r.idx += 1;
+      renderRedoQuestion();
+    });
+    document.getElementById("rb-exit").addEventListener("click", exitRedo);
+  }
+
+  /* ---------- 启动 ---------- */
+  function init() {
+    YS.auth.ensureDemo();
+    if (!YS.auth.requireLogin()) return;
+    renderBrowse();
+    bindEvents();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
