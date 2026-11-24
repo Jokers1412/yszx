@@ -1,11 +1,12 @@
-"""system 路由（挂载于 /api/admin/v1）。
+"""system 路由（admin 挂载于 /api/admin/v1；public_router 挂载于 /api/portal/v1）。
 
-已实现（04 §4.1/§4.9/§4.10/§4.11/§4.12）：
+已实现（04 §4.1/§4.9/§4.10/§4.11/§4.12 + §3.2）：
   认证：POST /auth/login | POST /auth/logout | GET /auth/profile
   用户管理（user:*）：/users 列表/详情/新增/编辑/删除/批量删除/启停/批量启停/重置密码
   角色管理（仅超管，Q3）：/roles 列表/新增/编辑/权限/删除 + GET /permissions
   操作日志（log:view / system:settings 归并）：/logs 列表/详情/导出 CSV/清空
   系统设置（system:settings）：GET/PUT /settings + POST /settings/upload
+  公开配置（游客）：GET /settings/public（public_router，两端共用）
 """
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -347,3 +348,14 @@ async def upload_setting_image(
     )
     await db.commit()
     return ok({"url": url})
+
+
+# ===================== 学员端公开配置（04 §3.2，挂载于 /api/portal/v1） =====================
+
+public_router = APIRouter(tags=["system"])
+
+
+@public_router.get("/settings/public")
+async def get_public_settings(db: AsyncSession = Depends(get_db)):
+    """平台公开配置（游客）：平台名称/描述/Logo/默认头像（两端共用）。"""
+    return ok(await service.get_public_settings(db))

@@ -844,6 +844,22 @@ async def get_system_settings(db: AsyncSession) -> SettingsResult:
     )
 
 
+async def get_public_settings(db: AsyncSession) -> dict:
+    """平台公开配置（04 §3.2 GET /settings/public，游客，两端共用）。
+
+    只读不建行；仅公开四项，goodRate 为首页内部值不对外（口径 S20）。
+    """
+    row = (
+        await db.execute(select(SystemSetting).where(SystemSetting.id == 1))
+    ).scalar_one_or_none()
+    return {
+        "platformName": row.platform_name if row else "云枢智学",
+        "platformDescription": row.platform_description if row else None,
+        "logoUrl": row.logo_url if row else None,
+        "defaultAvatarUrl": row.default_avatar_url if row else None,
+    }
+
+
 async def save_system_settings(
     db: AsyncSession, ctx: AdminContext, payload: SettingsUpdate, ip: str
 ) -> dict:
