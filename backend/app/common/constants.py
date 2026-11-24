@@ -46,5 +46,11 @@ EXPORT_MAX_ROWS = 10000
 UPLOAD_EXCEL_MAX_BYTES = 5 * 1024 * 1024     # Excel ≤5MB
 UPLOAD_IMAGE_MAX_BYTES = 2 * 1024 * 1024     # 图片 jpg/png ≤2MB
 
+# ---- 内容（04 §4.3 学科主题色 = 预置色板，与 prototype/admin/subjects.html PALETTE 一致）----
+THEME_COLOR_PALETTE = (
+    "#2a78d6", "#6250d6", "#1baf7a", "#eb6834",
+    "#e87ba4", "#008300", "#eda100", "#e34948",
+)
+
 # ---- 逻辑删除标记 ----
 DELETED_AT_NULL = None  # deleted_at IS NULL = 有效（语义常量，供代码引用）

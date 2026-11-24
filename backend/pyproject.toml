@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0.30",
     "aiomysql>=0.2.0",
+    "cryptography>=42.0",  # PyMySQL 连 MySQL 8 caching_sha2_password 认证所需
     "alembic>=1.13",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",

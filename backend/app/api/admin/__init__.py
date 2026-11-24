@@ -5,6 +5,7 @@ content/stats 为双端共用模块，其 admin 侧接口在功能开发时经�
 """
 from fastapi import APIRouter
 
+from app.modules.content.router import admin_router as content_admin_router
 from app.modules.stats.router import router as stats_router
 from app.modules.students.router import router as students_router
 from app.modules.system.router import router as system_router
@@ -12,4 +13,5 @@ from app.modules.system.router import router as system_router
 router = APIRouter()
 router.include_router(system_router)
 router.include_router(stats_router)
+router.include_router(content_admin_router)
 router.include_router(students_router)
