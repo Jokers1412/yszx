@@ -31,12 +31,12 @@ const routes: RouteRecordRaw[] = [
         ],
       },
       { path: 'profile', name: 'profile', component: () => import('@/views/profile/index.vue') },
+      // 账号页（原型 login/register 均带顶栏/页脚，归入主布局）
+      { path: 'login', name: 'login', component: () => import('@/views/auth/login.vue') },
+      { path: 'register', name: 'register', component: () => import('@/views/auth/register.vue') },
+      { path: 'forgot-password', name: 'forgotPassword', component: () => import('@/views/auth/forgot-password.vue') },
     ],
   },
-  // 账号页（独立于主布局）
-  { path: '/login', name: 'login', component: () => import('@/views/auth/login.vue') },
-  { path: '/register', name: 'register', component: () => import('@/views/auth/register.vue') },
-  { path: '/forgot-password', name: 'forgotPassword', component: () => import('@/views/auth/forgot-password.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 

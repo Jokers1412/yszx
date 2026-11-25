@@ -45,18 +45,17 @@ async function load() {
   }
 }
 
-/** 图片上传（受控：走统一封装，返回对象 URL） */
+/** 图片上传（受控：走统一封装，返回对象 URL）。
+ * 仅更新表单内预览作为待保存值；顶栏/侧栏等展示区一律「保存设置」后经 load() 刷新。 */
 async function doUpload(options: UploadRequestOptions, type: 'logo' | 'defaultAvatar') {
   try {
     const res = await uploadSettingImage(options.file as File, type)
     if (type === 'logo') {
       form.logoUrl = res.url
-      settingsStore.applyLocal({ logoUrl: res.url }) // 顶栏/侧栏即时预览
     } else {
       form.defaultAvatarUrl = res.url
-      settingsStore.applyLocal({ defaultAvatarUrl: res.url }) // 用户头像即时预览
     }
-    ElMessage.success('上传成功')
+    ElMessage.success('图片已上传，点击「保存设置」后生效')
   } catch (e) {
     ElMessage.error((e as ApiError)?.message || '上传失败（仅 jpg/png，≤2MB）')
   }

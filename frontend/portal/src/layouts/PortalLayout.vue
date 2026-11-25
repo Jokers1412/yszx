@@ -9,6 +9,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+import { logout as logoutApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 
@@ -64,6 +65,12 @@ async function handleLogout() {
     })
   } catch {
     return
+  }
+  // 通知服务端作废 refresh（04 §1.5）；失败也照常清理本地态
+  try {
+    await logoutApi({ refreshToken: auth.refreshToken || undefined })
+  } catch {
+    /* 忽略：登录态本就可能已失效 */
   }
   auth.clear()
   ElMessage.success('已退出登录')

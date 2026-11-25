@@ -66,6 +66,7 @@ def create_refresh_token(
         "sub": subject,
         "aud": audience,
         "typ": "refresh",
+        "rem": bool(remember),  # 记住我标记：refresh 滚动续期时沿用原有效期档位
         "iat": now,
         "exp": exp,
     }
@@ -92,6 +93,23 @@ def decode_token(
 
 
 # ---------- refresh 失效（04 §1.5：登出/改密/重置 → refresh 失效）----------
+
+# 学员端兼容后台账号登录（04 §1.5 Q4）：portal token 的 sub 对后台身份加前缀，
+# 与学员 id 天然隔离（epoch 失效键等按 subject 字符串命名空间化）
+ADMIN_SUBJECT_PREFIX = "adm:"
+
+
+def admin_portal_subject(admin_id: int) -> str:
+    """portal 端后台账号身份的 token sub（如 adm:3）。"""
+    return f"{ADMIN_SUBJECT_PREFIX}{admin_id}"
+
+
+def parse_portal_subject(subject: str) -> tuple[int, bool]:
+    """解析 portal token sub → (id, is_admin)。"""
+    if subject.startswith(ADMIN_SUBJECT_PREFIX):
+        return int(subject[len(ADMIN_SUBJECT_PREFIX):]), True
+    return int(subject), False
+
 
 def _token_fingerprint(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()

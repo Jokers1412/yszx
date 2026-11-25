@@ -1,6 +1,6 @@
-"""stats 路由（挂载于 /api/portal/v1，04 §3.2 首页 /home/*）。
+"""stats 路由（挂载于 /api/portal/v1，04 §3.2 首页 /home/* + §3.1 /profile/stats）。
 
-/profile/stats 与 admin /dashboard* 后续功能补齐（本阶段仅首页数据）。
+admin /dashboard* 后续功能补齐。
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,3 +32,12 @@ async def home_learn_stats(
 async def home_hot_stages(db: AsyncSession = Depends(get_db)):
     """热门阶段（游客）：启用阶段、按 sort_order、上限 12。"""
     return ok(await service.hot_stages(db))
+
+
+@router.get("/profile/stats")
+async def profile_stats(
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """个人学习数据（登录，03 §5.2 口径；admin 身份返回全 0）。"""
+    return ok(await service.profile_stats(db, ctx.student_id))

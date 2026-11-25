@@ -16,8 +16,8 @@ from app.common.utils import app_tz, utc_now
 from app.modules.accounts.models import Student
 from app.modules.content.models import Question, Stage, Subject
 from app.modules.interview.models import InterviewRecord
-from app.modules.learning.models import AnswerRecord
-from app.modules.stats.schemas import HomeStats, HotStage, LearnStats, WeekTrendPoint
+from app.modules.learning.models import AnswerRecord, WrongQuestion
+from app.modules.stats.schemas import HomeStats, HotStage, LearnStats, ProfileStats, WeekTrendPoint
 from app.modules.system.models import SystemSetting
 
 # streak 计算回看上限（连续学习天数按年封顶，足够业务语义）
@@ -54,11 +54,20 @@ async def home_stats(db: AsyncSession) -> dict:
     ).model_dump()
 
 
-async def learn_stats(db: AsyncSession, student_id: int) -> dict:
-    """学习统计 + 近 7 日趋势（登录）。
-
-    admin 身份（isAdmin 登录学员端）返回 0 值——待 accounts 登录实现时按 Q4 补充判定。
-    """
+async def learn_stats(db: AsyncSession, student_id: int | None) -> dict:
+    """学习统计 + 近 7 日趋势（登录）；admin 身份（Q4）无学习数据返回 0 值。"""
+    if student_id is None:
+        today = datetime.now(app_tz()).date()
+        return LearnStats(
+            streak=0,
+            accuracy=0.0,
+            totalPracticed=0,
+            todayDone=0,
+            weekTrend=[
+                WeekTrendPoint(date=(today - timedelta(days=o)).isoformat(), count=0)
+                for o in range(6, -1, -1)
+            ],
+        ).model_dump()
     total, correct = (
         await db.execute(
             select(
@@ -105,6 +114,53 @@ async def learn_stats(db: AsyncSession, student_id: int) -> dict:
         totalPracticed=total_n,
         todayDone=day_map.get(today, 0),
         weekTrend=week,
+    ).model_dump()
+
+
+async def profile_stats(db: AsyncSession, student_id: int | None) -> dict:
+    """个人学习数据（04 §3.1 GET /profile/stats）；admin 身份（Q4）返回全 0。
+
+    口径（03 §5.2）：practiceCount=作答题次；doneQuestions=去重题目数；
+    accuracy=答对÷作答（无作答 0）；wrongCount=错题本有效行；interviewCount=完成场次。
+    """
+    if student_id is None:
+        return ProfileStats(
+            practiceCount=0, wrongCount=0, interviewCount=0, doneQuestions=0, accuracy=0.0
+        ).model_dump()
+
+    total, correct, done = (
+        await db.execute(
+            select(
+                func.count(AnswerRecord.id),
+                func.coalesce(func.sum(AnswerRecord.is_correct), 0),
+                func.count(func.distinct(AnswerRecord.question_id)),
+            ).where(AnswerRecord.student_id == student_id)
+        )
+    ).one()
+    wrong = (
+        await db.execute(
+            select(func.count(WrongQuestion.id)).where(
+                WrongQuestion.student_id == student_id,
+                WrongQuestion.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one()
+    interviews = (
+        await db.execute(
+            select(func.count(InterviewRecord.id)).where(
+                InterviewRecord.student_id == student_id,
+                InterviewRecord.finished_at.is_not(None),
+            )
+        )
+    ).scalar_one()
+
+    total_n = int(total)
+    return ProfileStats(
+        practiceCount=total_n,
+        wrongCount=int(wrong),
+        interviewCount=int(interviews),
+        doneQuestions=int(done),
+        accuracy=round(float(correct) / total_n * 100, 1) if total_n else 0.0,
     ).model_dump()
 
 

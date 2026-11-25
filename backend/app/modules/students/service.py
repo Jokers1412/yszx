@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.constants import EXPORT_MAX_ROWS
 from app.common.enums import Difficulty, EnableStatus, OperationActionType
 from app.common.error_codes import ErrorCode
-from app.common.utils import to_shanghai, utc_now
+from app.common.utils import now_ts, to_shanghai, utc_now
 from app.core import security
 from app.core.audit import record_operation
 from app.core.context import AdminContext
@@ -224,7 +224,7 @@ async def list_student_interviews(db: AsyncSession, student_id: int, q) -> dict:
 
 async def _revoke_student_sessions(r: aioredis.Redis, student_id: int) -> None:
     """口径 S18：禁用/删除后 refresh 失效（access 短期仍可用，业务接口校验 status）。"""
-    await r.set(security.user_refresh_epoch_key("portal", str(student_id)), str(utc_now().timestamp()))
+    await r.set(security.user_refresh_epoch_key("portal", str(student_id)), str(now_ts()))
 
 
 async def patch_student_status(

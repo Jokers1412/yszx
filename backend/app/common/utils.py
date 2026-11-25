@@ -20,6 +20,11 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def now_ts() -> float:
+    """真实 Unix 秒（与 JWT iat 同量纲；naive .timestamp() 会被误当本地时间偏移时区）。"""
+    return datetime.now(timezone.utc).timestamp()
+
+
 def to_shanghai(dt: datetime | None) -> str | None:
     """UTC 时间 → Asia/Shanghai 展示字符串。"""
     if dt is None:

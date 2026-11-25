@@ -38,3 +38,13 @@ class HotStage(BaseModel):
     subjectId: int
     subjectName: str
     questionCount: int  # 仅已上架题目
+
+
+class ProfileStats(BaseModel):
+    """个人学习数据（04 §3.1 GET /profile/stats；admin 身份返回全 0）。"""
+
+    practiceCount: int  # 作答题次
+    wrongCount: int  # 错题本题目数（wrong_question 有效行）
+    interviewCount: int  # 完成的 AI 面试场次
+    doneQuestions: int  # 已做过的去重题目数
+    accuracy: float  # 正确率 %（答对÷作答，1 位小数，无作答 0）

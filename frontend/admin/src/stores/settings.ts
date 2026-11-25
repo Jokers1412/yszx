@@ -30,11 +30,5 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  /** 上传后即时预览（保存前也先展示，保存持久化） */
-  function applyLocal(partial: { logoUrl?: string; defaultAvatarUrl?: string }) {
-    if (partial.logoUrl !== undefined) logoUrl.value = partial.logoUrl
-    if (partial.defaultAvatarUrl !== undefined) defaultAvatarUrl.value = partial.defaultAvatarUrl
-  }
-
-  return { platformName, logoUrl, defaultAvatarUrl, loaded, load, applyLocal }
+  return { platformName, logoUrl, defaultAvatarUrl, loaded, load }
 })

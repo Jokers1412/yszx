@@ -18,7 +18,7 @@ from app.core.context import ROLE_SUPER_ADMIN, AdminContext
 from app.core.database import get_db
 from app.core.exceptions import BizError
 from app.core.redis import get_redis
-from app.core.security import decode_token
+from app.core.security import admin_portal_subject, decode_token, parse_portal_subject
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -56,10 +56,30 @@ def _decode_or_raise(token: str, audience: str, token_type: str = "access") -> d
 # ---------- 学员端登录态 ----------
 
 class StudentContext:
-    def __init__(self, student_id: int, phone: str, nickname: str) -> None:
+    """学员端登录态上下文。
+
+    is_admin=True 表示后台账号登录学员端（04 §1.5 Q4，仅基础信息/无学习数据），
+    此时 student_id 为 None、admin_id 为后台账号 id。
+    """
+
+    def __init__(
+        self,
+        student_id: int | None,
+        phone: str,
+        nickname: str,
+        is_admin: bool = False,
+        admin_id: int | None = None,
+    ) -> None:
         self.student_id = student_id
         self.phone = phone
         self.nickname = nickname
+        self.is_admin = is_admin
+        self.admin_id = admin_id
+
+    @property
+    def subject(self) -> str:
+        """portal token 的 sub（refresh 失效 epoch 键命名空间，学员/后台身份隔离）。"""
+        return admin_portal_subject(self.admin_id) if self.is_admin else str(self.student_id)
 
 
 async def get_current_student(
@@ -68,21 +88,36 @@ async def get_current_student(
     db: AsyncSession = Depends(get_db),
 ) -> StudentContext:
     payload = _decode_or_raise(token, "portal")
-    student_id = int(payload["sub"])
+    student_id, is_admin = parse_portal_subject(str(payload["sub"]))
 
     from app.modules.accounts.models import Student  # 延迟导入，保持 core 无模块依赖方向
 
-    row = (
-        await db.execute(
-            select(Student).where(Student.id == student_id, Student.deleted_at.is_(None))
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise BizError(ErrorCode.AUTH_TOKEN_INVALID, "账号不存在或已注销", http_status=401)
-    if row.status != 1:
-        raise BizError(ErrorCode.AUTH_ACCOUNT_DISABLED, "账号已被禁用", http_status=403)
+    if is_admin:
+        from app.modules.system.models import AdminUser
 
-    ctx = StudentContext(row.id, row.phone, row.nickname)
+        row = (
+            await db.execute(
+                select(AdminUser).where(AdminUser.id == student_id, AdminUser.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise BizError(ErrorCode.AUTH_TOKEN_INVALID, "账号不存在或已注销", http_status=401)
+        if row.status != 1:
+            raise BizError(ErrorCode.AUTH_ACCOUNT_DISABLED, "账号已被禁用", http_status=403)
+        ctx = StudentContext(None, row.phone, row.username, is_admin=True, admin_id=row.id)
+    else:
+        row = (
+            await db.execute(
+                select(Student).where(Student.id == student_id, Student.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise BizError(ErrorCode.AUTH_TOKEN_INVALID, "账号不存在或已注销", http_status=401)
+        if row.status != 1:
+            raise BizError(ErrorCode.AUTH_ACCOUNT_DISABLED, "账号已被禁用", http_status=403)
+
+        ctx = StudentContext(row.id, row.phone, row.nickname)
+
     request.state.student_ctx = ctx
     return ctx
 
