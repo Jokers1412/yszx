@@ -260,6 +260,47 @@ h1, h2, h3, h4, h5 { margin: 0 0 .5em; line-height: 1.35; color: var(--ink); }
   box-shadow: var(--shadow-lg); white-space: nowrap;
 }
 
+/* ---------- 进度条 ---------- */
+.progress { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.progress .progress-bar {
+  height: 100%; background: var(--brand); border-radius: 999px; transition: width .3s ease;
+}
+.progress .progress-bar.success { background: var(--success); }
+
+/* ---------- 学习路线（对齐 prototype portal.css） ---------- */
+.route-subject-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+.route-subject-card {
+  padding: 16px 14px; text-align: center; cursor: pointer; border: 1.5px solid var(--line);
+  border-radius: var(--radius); background: var(--surface); transition: all .15s; user-select: none;
+}
+.route-subject-card:hover { border-color: var(--brand); transform: translateY(-2px); }
+.route-subject-card.active { border-color: var(--brand); background: var(--brand-light); }
+.route-subject-card.disabled-sub { opacity: .55; }
+.route-subject-card .rs-icon { font-size: 26px; }
+.route-subject-card .rs-name { font-size: 13px; font-weight: 600; margin-top: 6px; }
+.route-subject-card .rs-count { font-size: 11px; color: var(--ink-3); }
+.route-tab { display: inline-flex; align-items: center; gap: 6px; }
+.route-head { padding: 24px; margin-bottom: 16px; }
+.route-head .rh-stats { display: flex; gap: 24px; flex-wrap: wrap; margin: 10px 0 14px; font-size: 13px; color: var(--ink-2); }
+.course-row {
+  display: flex; align-items: center; gap: 14px; padding: 14px 18px; border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--surface); margin-bottom: 10px;
+}
+.course-row.done { border-color: var(--success); }
+.course-row.done .c-title::after { content: " ✓"; color: var(--success); }
+.course-row .c-index {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--brand-light); color: var(--brand);
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;
+}
+.course-row .c-cover {
+  width: 84px; height: 48px; border-radius: 6px; background: var(--brand-grad); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+  padding: 0; overflow: hidden;
+}
+.course-row .c-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.course-row .c-title { font-weight: 600; font-size: 14px; }
+.course-row .c-sub { font-size: 12px; color: var(--ink-3); display: flex; gap: 10px; }
+
 /* 页面占位（功能开发阶段逐页替换为原型实现） */
 .page-placeholder {
   padding: 48px 24px;
