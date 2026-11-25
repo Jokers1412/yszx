@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     rate_limit_sms_code_per_hour: int = 30
     rate_limit_interview_per_hour: int = 10
 
+    # ---- AI 面试每日配额（02 D12：发起计次、0 点重置，Redis 计数）----
+    interview_daily_quota: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:

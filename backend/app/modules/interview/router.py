@@ -1,8 +1,8 @@
 """interview 路由（/api/portal/v1 与 /api/admin/v1 双侧挂载）。
 
-学员端接口清单见 04 §2.1（/interviews* 共 7 个）：
-  发起面试（配额校验+抽题）| 提交作答（逐题评分）| finish | 报告 | 记录列表/详情/回放
-待功能开发阶段按契约实现（挂在 router）。
+学员端已实现（04 §3.4 #33-38 + 回放）：
+  GET /interviews/config-meta | POST /interviews 发起（配额+抽题）| POST /{id}/answers 逐题评分
+  POST /{id}/finish 生成报告 | GET /{id}/report | GET /interviews 记录 | GET /{id} 回放
 
 管理端已实现（04 §4.6 面试题库管理，interviewbank:*）：
   GET /interview-questions 列表 | GET /{id} 详情 | POST 录入 | PUT 仅主题/难度 | DELETE 逻辑删除
@@ -16,15 +16,20 @@ import redis.asyncio as aioredis
 
 from app.core.context import AdminContext
 from app.core.database import get_db
+from app.core.deps import StudentContext, get_current_student
 from app.core.rbac import require_perm
 from app.core.redis import get_redis
 from app.core.response import ok
 from app.modules.content.schemas import ImportConfirmRequest
 from app.modules.interview import service
 from app.modules.interview.schemas import (
+    AnswerSubmitRequest,
+    FinishRequest,
     InterviewQuestionCreate,
     InterviewQuestionQuery,
     InterviewQuestionUpdate,
+    RecordsQuery,
+    StartInterviewRequest,
 )
 
 router = APIRouter(tags=["interview"])
@@ -33,6 +38,86 @@ admin_router = APIRouter(tags=["interview"])
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
+
+
+# ===================== 学员端 · AI 面试（04 §3.4） =====================
+# /interviews/config-meta 须先于 /interviews/{record_id} 注册（避免被参数路由吞掉）。
+
+
+@router.get("/interviews/config-meta")
+async def config_meta(
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+):
+    """面试配置页数据（方向/难度/题量/超时/今日剩余配额）。"""
+    return ok(await service.config_meta(db, r, ctx.student_id))
+
+
+@router.post("/interviews")
+async def start_interview(
+    req: StartInterviewRequest,
+    request: Request,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+):
+    """发起面试（S1 发起即计配额；Q4 题库不足 AI 补充；S11 一次下发全部题干）。"""
+    return ok(
+        await service.start_interview(db, r, ctx.student_id, _client_ip(request), req)
+    )
+
+
+@router.post("/interviews/{record_id}/answers")
+async def submit_answer(
+    record_id: int,
+    req: AnswerSubmitRequest,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交逐题作答（AI 评分；失败 503 不落记录可重试；重复提交 409）。"""
+    return ok(await service.submit_answer(db, ctx.student_id, record_id, req))
+
+
+@router.post("/interviews/{record_id}/finish")
+async def finish(
+    record_id: int,
+    req: FinishRequest,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """结束面试并生成报告（中途结束也可生成；重复 finish 409）。"""
+    return ok(await service.finish(db, ctx.student_id, record_id, req))
+
+
+@router.get("/interviews/{record_id}/report")
+async def get_report(
+    record_id: int,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """面试报告（W3 评分换算 + 同方向相比上次）。"""
+    return ok(await service.get_report(db, ctx.student_id, record_id))
+
+
+@router.get("/interviews")
+async def list_records(
+    q: RecordsQuery = Depends(),
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """面试记录列表 + 统计卡（仅已完成场次）。"""
+    return ok(await service.list_records(db, ctx.student_id, q))
+
+
+@router.get("/interviews/{record_id}")
+async def get_replay(
+    record_id: int,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """面试回放（S12 逐题快照重建对话流，仅本人可看）。"""
+    return ok(await service.get_replay(db, ctx.student_id, record_id))
 
 
 # ===================== 管理端 · 面试题库管理（04 §4.6） =====================

@@ -42,7 +42,7 @@ async def send_sms_code(
     request: Request,
     r: aioredis.Redis = Depends(get_redis),
 ):
-    """获取手机验证码（不回传验证码本体；Mock 短信见 core.sms）。"""
+    """获取手机验证码（开发阶段 Mock 回传 mockCode 页面弹窗展示；真实供应商不回传本体）。"""
     return ok(await service.send_sms_code(r, payload, ip=_client_ip(request)))
 
 

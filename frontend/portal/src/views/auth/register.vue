@@ -9,6 +9,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { fetchSmsCode, register } from '@/api/auth'
+import { showMockSmsCode } from '@/utils/mock-sms'
 import type { ApiError } from '@shared/types/api'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -71,8 +72,9 @@ async function sendCode() {
     return
   }
   try {
-    await fetchSmsCode('register', phone.value.trim())
+    const res = await fetchSmsCode('register', phone.value.trim())
     ElMessage.success('验证码已发送')
+    showMockSmsCode(res.mockCode) // 开发阶段：弹窗直显验证码
     startCountdown()
   } catch (e) {
     ElMessage.error((e as ApiError)?.message || '获取验证码失败')

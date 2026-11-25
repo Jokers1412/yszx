@@ -1,16 +1,21 @@
-"""stats 路由（挂载于 /api/portal/v1，04 §3.2 首页 /home/* + §3.1 /profile/stats）。
+"""stats 路由（portal 挂 /api/portal/v1；admin 挂 /api/admin/v1）。
 
-admin /dashboard* 后续功能补齐。
+portal：04 §3.2 首页 /home/* + §3.1 /profile/stats；
+admin：04 §4.2 数据看板 /dashboard*（dashboard:view）。
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.context import AdminContext
 from app.core.database import get_db
 from app.core.deps import StudentContext, get_current_student
+from app.core.rbac import require_perm
 from app.core.response import ok
 from app.modules.stats import service
+from app.modules.stats.schemas import UserGrowthQuery
 
 router = APIRouter(tags=["stats"])
+admin_router = APIRouter(tags=["stats"])
 
 
 @router.get("/home/stats")
@@ -41,3 +46,25 @@ async def profile_stats(
 ):
     """个人学习数据（登录，03 §5.2 口径；admin 身份返回全 0）。"""
     return ok(await service.profile_stats(db, ctx.student_id))
+
+
+# ===================== 管理端 · 数据看板（04 §4.2） =====================
+
+
+@admin_router.get("/dashboard")
+async def dashboard(
+    _ctx: AdminContext = Depends(require_perm("dashboard:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """看板汇总：卡片+趋势文案+题目学科分布+最近活动。"""
+    return ok(await service.dashboard(db))
+
+
+@admin_router.get("/dashboard/user-growth")
+async def user_growth(
+    q: UserGrowthQuery = Depends(),
+    _ctx: AdminContext = Depends(require_perm("dashboard:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """用户增长趋势（days=7|30|90，按注册日期沪日界计数）。"""
+    return ok(await service.user_growth(db, int(q.days)))

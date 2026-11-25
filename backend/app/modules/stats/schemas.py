@@ -2,7 +2,7 @@
 
 统计口径以 03 §5.2 为准（streak=W2 口径、报告评分换算=W3 口径）。
 """
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -48,3 +48,58 @@ class ProfileStats(BaseModel):
     interviewCount: int  # 完成的 AI 面试场次
     doneQuestions: int  # 已做过的去重题目数
     accuracy: float  # 正确率 %（答对÷作答，1 位小数，无作答 0）
+
+
+# ===================== 数据看板（04 §4.2） =====================
+
+
+class DashboardCards(BaseModel):
+    """卡片 4 项实时统计（C4 不新增指标）。"""
+
+    subjectCount: int  # 有效学科数
+    questionCount: int  # 全部有效题目数（S13 与分布同口径）
+    registeredUsers: int  # 有效学员数
+    aiInterviewCount: int  # AI 面试场次（interview_record 行数）
+
+
+class DashboardTrends(BaseModel):
+    """趋势文案（服务端按环比计算，较上周）。"""
+
+    subject: str
+    question: str
+    user: str
+    interview: str
+
+
+class DistributionItem(BaseModel):
+    subjectName: str
+    count: int  # 该学科全部有效题目数（S13）
+
+
+class ActivityItem(BaseModel):
+    adminUsername: Optional[str] = None
+    action: str
+    detail: Optional[str] = None
+    at: str
+
+
+class DashboardResult(BaseModel):
+    cards: DashboardCards
+    trends: DashboardTrends
+    questionDistribution: list[DistributionItem]
+    recentActivities: list[ActivityItem]  # operation_log 有效行前 5 条
+
+
+class UserGrowthQuery(BaseModel):
+    """GET /dashboard/user-growth 查询参数（query 串形态，服务端转 int）。"""
+
+    days: Literal["7", "30", "90"]
+
+
+class GrowthPoint(BaseModel):
+    date: str  # YYYY-MM-DD（Asia/Shanghai 日界）
+    count: int
+
+
+class UserGrowthResult(BaseModel):
+    points: list[GrowthPoint]

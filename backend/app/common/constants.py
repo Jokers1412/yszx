@@ -15,7 +15,7 @@ SMS_SEND_INTERVAL_SECONDS = 60     # 同手机号 60s 仅 1 次
 SMS_DAILY_LIMIT = 10               # 同手机号每日上限 10 次
 SMS_VERIFY_FAIL_MAX = 5            # 同验证码连续校验失败 5 次失效
 SMS_CODE_LENGTH = 6                # 6 位验证码
-SMS_CODE_TTL_SECONDS = 5 * 60      # ⚠️ 有效期待与用户确认（需求未定稿，暂定 5 分钟）
+SMS_CODE_TTL_SECONDS = 3 * 60      # 有效期 3 分钟（2026-11-25 用户定稿）
 
 # ---- 密码规则 ----
 PASSWORD_MIN_LEN = 6

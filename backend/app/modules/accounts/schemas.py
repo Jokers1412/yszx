@@ -15,6 +15,7 @@ class SmsCodeRequest(BaseModel):
 
 class SmsCodeResult(BaseModel):
     sentAt: str  # 60s 倒计时基准（Asia/Shanghai）
+    mockCode: Optional[str] = None  # ⚠️ 开发阶段专用：sms_provider=mock 时回传，页面弹窗展示；真实供应商接入后移除
 
 
 class RegisterRequest(BaseModel):

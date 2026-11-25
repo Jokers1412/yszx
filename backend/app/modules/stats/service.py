@@ -1,24 +1,39 @@
-"""stats 业务服务（04 §3.2 首页 /home/*）。
+"""stats 业务服务（04 §3.2 首页 /home/* + §4.2 数据看板）。
 
 口径（03 §5.2）：
   - Hero：精选面试题=已上架题目数、注册学员=学员有效行、AI面试次数=interview_record 行数
     （三项实时统计），好评率=system_setting.good_rate 静态值；
   - streak=W2：截至今天（今天无作答则截至昨天）向前连续有作答的天数，中断归零；
   - 练习量均为作答题次，按 Asia/Shanghai 日界聚合（CONVERT_TZ 固定偏移，同 students 模块）。
+看板口径（04 §4.2）：卡片 4 项实时统计；趋势文案=较上周环比；题目分布=各学科全部
+有效题目（S13）；最近活动=operation_log 有效行前 5 条；用户增长按注册日期（沪日界）。
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import EnableStatus, QuestionStatus
-from app.common.utils import app_tz, utc_now
+from app.common.utils import CN_TZ, app_tz, shanghai_today, to_shanghai, utc_now
 from app.modules.accounts.models import Student
 from app.modules.content.models import Question, Stage, Subject
 from app.modules.interview.models import InterviewRecord
 from app.modules.learning.models import AnswerRecord, WrongQuestion
-from app.modules.stats.schemas import HomeStats, HotStage, LearnStats, ProfileStats, WeekTrendPoint
-from app.modules.system.models import SystemSetting
+from app.modules.stats.schemas import (
+    ActivityItem,
+    DashboardCards,
+    DashboardResult,
+    DashboardTrends,
+    DistributionItem,
+    GrowthPoint,
+    HomeStats,
+    HotStage,
+    LearnStats,
+    ProfileStats,
+    UserGrowthResult,
+    WeekTrendPoint,
+)
+from app.modules.system.models import OperationLog, SystemSetting
 
 # streak 计算回看上限（连续学习天数按年封顶，足够业务语义）
 _STREAK_LOOKBACK_DAYS = 400
@@ -208,3 +223,129 @@ async def hot_stages(db: AsyncSession) -> list[dict]:
         ).model_dump()
         for row in rows
     ]
+
+
+# ===================== 数据看板（04 §4.2） =====================
+
+
+def _trend_text(current: int, prev: int) -> str:
+    """趋势文案：较上周环比（原型 ↑12% 较上周 / ↓2% 较上周 / — 与上周持平）。"""
+    delta = current - prev
+    if delta == 0:
+        return "— 与上周持平"
+    if prev == 0:
+        return f"↑ 本周新增 {delta}" if delta > 0 else f"↓ 本周减少 {-delta}"
+    pct = round(abs(delta) / prev * 100)
+    return f"↑ {pct}% 较上周" if delta > 0 else f"↓ {pct}% 较上周"
+
+
+async def dashboard(db: AsyncSession) -> dict:
+    """看板汇总：卡片+环比趋势文案+题目学科分布（S13）+最近活动。"""
+    cutoff = utc_now() - timedelta(days=7)
+
+    async def _count(model, *filters, with_deleted: bool = False) -> tuple[int, int]:
+        """(当前总数, 7 天前存量) —— 同一有效行口径。"""
+        base = list(filters)
+        cur = (
+            await db.execute(select(func.count(model.id)).where(*base))
+        ).scalar_one()
+        prev = (
+            await db.execute(
+                select(func.count(model.id)).where(*base, model.created_at < cutoff)
+            )
+        ).scalar_one()
+        return int(cur), int(prev)
+
+    sub_now, sub_prev = await _count(Subject, Subject.deleted_at.is_(None))
+    q_now, q_prev = await _count(Question, Question.deleted_at.is_(None))
+    stu_now, stu_prev = await _count(Student, Student.deleted_at.is_(None))
+    iv_now, iv_prev = await _count(InterviewRecord)
+
+    # 题目学科分布：各学科全部有效题目（S13，含 0 题学科）
+    dist_rows = (
+        await db.execute(
+            select(Stage.subject_id, func.count(Question.id))
+            .select_from(Question)
+            .join(Stage, Stage.id == Question.stage_id)
+            .where(
+                Question.deleted_at.is_(None),
+                Stage.deleted_at.is_(None),
+            )
+            .group_by(Stage.subject_id)
+        )
+    ).all()
+    dist_map = {int(sid): int(n) for sid, n in dist_rows}
+    subjects = (
+        await db.execute(
+            select(Subject.id, Subject.name)
+            .where(Subject.deleted_at.is_(None))
+            .order_by(Subject.sort_order, Subject.id)
+        )
+    ).all()
+
+    # 最近活动：operation_log 有效行前 5 条
+    logs = (
+        (
+            await db.execute(
+                select(OperationLog)
+                .where(OperationLog.deleted_at.is_(None))
+                .order_by(OperationLog.created_at.desc(), OperationLog.id.desc())
+                .limit(5)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return DashboardResult(
+        cards=DashboardCards(
+            subjectCount=sub_now,
+            questionCount=q_now,
+            registeredUsers=stu_now,
+            aiInterviewCount=iv_now,
+        ),
+        trends=DashboardTrends(
+            subject=_trend_text(sub_now, sub_prev),
+            question=_trend_text(q_now, q_prev),
+            user=_trend_text(stu_now, stu_prev),
+            interview=_trend_text(iv_now, iv_prev),
+        ),
+        questionDistribution=[
+            DistributionItem(subjectName=s[1], count=dist_map.get(int(s[0]), 0)).model_dump()
+            for s in subjects
+        ],
+        recentActivities=[
+            ActivityItem(
+                adminUsername=lg.admin_username,
+                action=lg.action_desc,
+                detail=lg.detail or lg.target,
+                at=to_shanghai(lg.created_at) or "",
+            ).model_dump()
+            for lg in logs
+        ],
+    ).model_dump()
+
+
+async def user_growth(db: AsyncSession, days: int) -> dict:
+    """用户增长趋势：按注册日期（Asia/Shanghai 日界）计数，缺日补 0。"""
+    start_utc = shanghai_today() - timedelta(days=days - 1)
+    rows = (
+        await db.execute(
+            select(
+                func.date(func.convert_tz(Student.created_at, "+00:00", "+08:00")),
+                func.count(Student.id),
+            )
+            .where(Student.deleted_at.is_(None), Student.created_at >= start_utc)
+            .group_by(func.date(func.convert_tz(Student.created_at, "+00:00", "+08:00")))
+        )
+    ).all()
+    counts = {str(d): int(n) for d, n in rows}
+    today_cn = datetime.now(timezone.utc).astimezone(CN_TZ).date()
+    points = [
+        GrowthPoint(
+            date=(today_cn - timedelta(days=i)).strftime("%Y-%m-%d"),
+            count=counts.get((today_cn - timedelta(days=i)).strftime("%Y-%m-%d"), 0),
+        ).model_dump()
+        for i in range(days - 1, -1, -1)
+    ]
+    return UserGrowthResult(points=points).model_dump()

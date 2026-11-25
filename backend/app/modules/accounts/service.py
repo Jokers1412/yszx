@@ -102,7 +102,11 @@ async def send_sms_code(r: aioredis.Redis, payload: SmsCodeRequest, ip: str) -> 
     await r.set(_sms_code_key(_sms_code_id(payload.scene, payload.phone)), code, ex=C.SMS_CODE_TTL_SECONDS)
     await sms.send_sms_code(payload.phone, code)
 
-    return {"sentAt": to_shanghai(utc_now())}
+    # ⚠️ 开发阶段：Mock 供应商时回传验证码，页面弹窗直接展示（真实供应商接入后移除）
+    return {
+        "sentAt": to_shanghai(utc_now()),
+        "mockCode": code if settings.sms_provider == "mock" else None,
+    }
 
 
 async def register(db: AsyncSession, r: aioredis.Redis, payload: RegisterRequest, ip: str) -> dict:

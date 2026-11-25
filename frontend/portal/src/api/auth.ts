@@ -42,8 +42,11 @@ export interface ProfileStats {
 
 export type SmsScene = 'register' | 'login' | 'reset'
 
-/** 获取短信验证码（不回传验证码本体；开发期在后端控制台查看 Mock 短信） */
-export function fetchSmsCode(scene: SmsScene, phone: string): Promise<{ sentAt: string }> {
+/** 获取短信验证码（⚠️ 开发阶段 Mock 附带 mockCode 页面弹窗展示；真实供应商接入后移除） */
+export function fetchSmsCode(
+  scene: SmsScene,
+  phone: string,
+): Promise<{ sentAt: string; mockCode?: string | null }> {
   return request.post('/auth/sms-code', { scene, phone })
 }
 

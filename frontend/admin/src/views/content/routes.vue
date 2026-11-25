@@ -6,6 +6,7 @@
  * 按钮级权限 v-permission（route:view/create/edit/delete）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
@@ -33,6 +34,7 @@ const pageNum = ref(1)
 const pageSize = ref(9)
 const filter = reactive({ keyword: '', subjectId: '' as string | number, status: '' })
 const subjectOptions = ref<SubjectItem[]>([])
+const route = useRoute()
 
 function buildQuery() {
   return {
@@ -75,6 +77,8 @@ onMounted(() => {
       subjectOptions.value = res.list
     })
     .catch(() => {})
+  // 数据看板「创建新路线」快捷入口（?new=1）自动打开新建弹窗
+  if (route.query.new === '1') openForm()
 })
 
 /** 时长文案：390 → 「6 小时 30 分钟」（原型 fmtDur） */

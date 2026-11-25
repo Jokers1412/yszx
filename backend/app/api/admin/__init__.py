@@ -7,7 +7,7 @@ from fastapi import APIRouter
 
 from app.modules.content.router import admin_router as content_admin_router
 from app.modules.interview.router import admin_router as interview_admin_router
-from app.modules.stats.router import router as stats_router
+from app.modules.stats.router import admin_router as stats_router
 from app.modules.students.router import router as students_router
 from app.modules.system.router import router as system_router
 
