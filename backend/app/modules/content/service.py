@@ -59,6 +59,9 @@ from app.modules.content.schemas import (
     CourseQuery,
     CourseUpdate,
     ImportConfirmRequest,
+    PortalSubjectCard,
+    PortalSubjectDetail,
+    PortalStageItem,
     RouteCreate,
     RouteItemsAdd,
     RouteItemsUpdate,
@@ -2352,3 +2355,92 @@ async def export_questions_xlsx(
     )
     await db.commit()
     return "questions.xlsx", buf.getvalue(), truncated
+
+
+# ===================== 学员端 · 题库中心（04 §3.3 #16-17） =====================
+
+
+async def portal_subjects(db: AsyncSession) -> list[dict]:
+    """学科列表（题库中心左栏）：仅有效学科按 sort_order，含「其他学科」。
+
+    stageCount=启用阶段数（与 /subjects/{id} 的 stages 口径一致）。
+    """
+    subjects = (
+        await db.execute(
+            select(Subject.id, Subject.name, Subject.icon, Subject.description, Subject.theme_color)
+            .where(Subject.deleted_at.is_(None))
+            .order_by(Subject.sort_order, Subject.id)
+        )
+    ).all()
+    stage_counts = dict(
+        (
+            await db.execute(
+                select(Stage.subject_id, func.count(Stage.id))
+                .where(Stage.deleted_at.is_(None), Stage.status == int(EnableStatus.ENABLED))
+                .group_by(Stage.subject_id)
+            )
+        ).all()
+    )
+    return [
+        PortalSubjectCard(
+            id=int(s[0]),
+            name=s[1],
+            icon=s[2],
+            description=s[3],
+            themeColor=s[4],
+            stageCount=int(stage_counts.get(s[0], 0)),
+        ).model_dump()
+        for s in subjects
+    ]
+
+
+async def portal_subject_detail(db: AsyncSession, subject_id: int) -> dict:
+    """学科信息头 + 阶段列表：仅启用阶段；questionCount 限已上架题目。"""
+    subject = (
+        await db.execute(
+            select(Subject).where(Subject.id == subject_id, Subject.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if subject is None:
+        raise BizError(ErrorCode.RESOURCE_NOT_FOUND, "学科不存在", http_status=404)
+
+    stages = (
+        await db.execute(
+            select(Stage)
+            .where(
+                Stage.subject_id == subject_id,
+                Stage.deleted_at.is_(None),
+                Stage.status == int(EnableStatus.ENABLED),
+            )
+            .order_by(Stage.sort_order, Stage.id)
+        )
+    ).scalars().all()
+    counts: dict[int, int] = {}
+    if stages:
+        counts = {
+            int(r[0]): int(r[1])
+            for r in (
+                await db.execute(
+                    select(Question.stage_id, func.count(Question.id))
+                    .where(
+                        Question.stage_id.in_([s.id for s in stages]),
+                        Question.deleted_at.is_(None),
+                        Question.status == int(QuestionStatus.ON_SHELF),
+                    )
+                    .group_by(Question.stage_id)
+                )
+            ).all()
+        }
+    return PortalSubjectDetail(
+        id=subject.id,
+        name=subject.name,
+        icon=subject.icon,
+        description=subject.description,
+        stageCount=len(stages),
+        stages=[
+            PortalStageItem(
+                id=s.id, name=s.name, icon=s.icon, questionCount=counts.get(s.id, 0)
+            ).model_dump()
+            for s in stages
+        ],
+    ).model_dump()

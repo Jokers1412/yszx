@@ -12,6 +12,7 @@ import redis.asyncio as aioredis
 
 from app.core.context import AdminContext
 from app.core.database import get_db
+from app.core.deps import get_current_student
 from app.core.rbac import require_perm
 from app.core.redis import get_redis
 from app.core.response import ok
@@ -530,3 +531,25 @@ async def unpublish_question(
 ):
     """下架（仅已上架可下架）。"""
     return ok(await service.unpublish_question(db, ctx, question_id, ip=_client_ip(request)))
+
+
+# ===================== 学员端 · 题库中心（04 §3.3 #16-17，挂载于 /api/portal/v1） =====================
+
+
+@router.get("/subjects")
+async def portal_subjects(
+    _ctx=Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """学科列表（题库中心左栏）：含「其他学科」，stageCount=启用阶段数。"""
+    return ok(await service.portal_subjects(db))
+
+
+@router.get("/subjects/{subject_id}")
+async def portal_subject_detail(
+    subject_id: int,
+    _ctx=Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """学科信息头 + 阶段列表（仅启用阶段，questionCount 限已上架）。"""
+    return ok(await service.portal_subject_detail(db, subject_id))

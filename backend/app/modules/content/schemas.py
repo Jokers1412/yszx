@@ -375,3 +375,33 @@ class QuestionImportPreviewRow(BaseModel):
     stageName: str
     type: str
     difficulty: str
+
+
+# ===================== 学员端 · 题库中心（04 §3.3 #16-17） =====================
+
+
+class PortalSubjectCard(BaseModel):
+    """学科列表（题库中心左栏，含「其他学科」）。"""
+
+    id: int
+    name: str
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    themeColor: Optional[str] = None
+    stageCount: int  # 启用阶段数
+
+
+class PortalStageItem(BaseModel):
+    id: int
+    name: str
+    icon: Optional[str] = None
+    questionCount: int  # 仅已上架题目（Q2 同口径）
+
+
+class PortalSubjectDetail(BaseModel):
+    id: int
+    name: str
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    stageCount: int
+    stages: list[PortalStageItem]
