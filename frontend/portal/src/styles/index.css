@@ -457,6 +457,55 @@ h1, h2, h3, h4, h5 { margin: 0 0 .5em; line-height: 1.35; color: var(--ink); }
   .practice-side { position: static; }
 }
 
+/* ---------- 错题本（对齐 prototype portal.css + wrongbook.html） ---------- */
+.text-center { text-align: center; }
+.gap-8 { gap: 8px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip {
+  padding: 5px 14px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface);
+  color: var(--ink-2); font-size: 13px; cursor: pointer; transition: all .12s; user-select: none;
+}
+.chip:hover { border-color: var(--brand); color: var(--brand); }
+.chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.batch-bar {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 900;
+  display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg);
+}
+.batch-bar .batch-count { color: var(--brand-dark); font-weight: 600; margin-right: auto; }
+.wb-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.top3-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+.top3-card { padding: 14px 16px; cursor: pointer; border-left: 3px solid var(--danger); transition: all .15s; }
+.top3-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.top3-card .t3-rank { font-size: 12px; color: var(--danger-text); font-weight: 600; }
+.top3-card .t3-stem {
+  font-size: 13px; margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wrong-filter-bar { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; margin-bottom: 16px; }
+.wrong-filter-bar .select { width: auto; min-width: 132px; }
+.wrong-filter-bar .fb-label { font-size: 13px; color: var(--ink-3); white-space: nowrap; }
+.wrong-filter-bar .fb-group { display: flex; align-items: center; gap: 8px; }
+.wrong-card { padding: 18px 20px; margin-bottom: 12px; display: flex; gap: 14px; }
+.wrong-card.mastered { opacity: .55; }
+.wrong-card .w-body { flex: 1; min-width: 0; }
+.wrong-card .w-stem { font-weight: 500; margin-bottom: 8px; }
+.wrong-card .w-info {
+  display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-3); margin-bottom: 10px;
+}
+.wrong-card .w-answers {
+  display: flex; gap: 16px; font-size: 13px; margin-bottom: 12px; flex-wrap: wrap; line-height: 1.7;
+}
+.wrong-card .w-actions { display: flex; gap: 8px; }
+.w-ans-wrong { color: var(--danger-text); }
+.w-ans-right { color: var(--success-text); }
+.redo-wrap { max-width: 780px; margin: 0 auto; }
+.redo-wrap .question-panel { padding: 28px 32px; }
+
+@media (max-width: 900px) {
+  .wb-stats { grid-template-columns: repeat(2, 1fr); }
+  .top3-strip { grid-template-columns: 1fr; }
+}
+
 /* 页面占位（功能开发阶段逐页替换为原型实现） */
 .page-placeholder {
   padding: 48px 24px;

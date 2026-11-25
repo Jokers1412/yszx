@@ -191,3 +191,94 @@ class ShortGradeResult(BaseModel):
     isCorrect: bool
     aiGrade: AiGradeOut
     referenceAnswer: Optional[str] = None
+
+
+# ===================== 错题本（04 §3.3 #22-28 / 需求 3.6） =====================
+
+AnswerValue = Union[list[str], bool, str]  # 作答快照形态（03 附录 A）
+
+
+class WrongListQuery(PageQuery):
+    """GET /wrong-questions 查询参数。"""
+
+    mastery: Optional[Literal["all", "reviewing", "mastered"]] = None  # 缺省 all
+    category: Optional[str] = Field(default=None, max_length=100, description="所属分类（阶段名，S7）")
+    keyword: Optional[str] = Field(default=None, max_length=100, description="题干模糊")
+    timeRange: Optional[Literal["all", "7d", "30d"]] = None
+    sort: Optional[Literal["lastWrongAt", "wrongCount"]] = None  # 均倒序，默认 lastWrongAt
+
+
+class WrongCategoryOut(BaseModel):
+    """所属分类（S7：分类=阶段名，学科名辅助展示）。"""
+
+    stageName: str
+    subjectName: str
+
+
+class WrongTop3Item(BaseModel):
+    id: int  # 错题 id
+    questionId: int
+    content: str
+    wrongCount: int
+
+
+class WrongStatsResult(BaseModel):
+    total: int
+    reviewing: int
+    mastered: int
+    masteryRate: float  # 掌握率百分比（03 §5.2，1 位小数）
+    top3: list[WrongTop3Item]
+    categories: list[WrongCategoryOut]  # 筛选下拉选项（增量字段，全量分类）
+
+
+class WrongListItem(BaseModel):
+    id: int  # 错题 id
+    questionId: int
+    content: str
+    type: str
+    level: str  # highFreq | multiple | occasional（wrong_count 派生，附录 C）
+    corrected: int  # 纠正进度 correct_streak（0~3）
+    masteryStatus: str  # reviewing | mastered
+    lastWrongAt: str
+    wrongCount: int
+    myAnswer: Optional[AnswerValue] = None  # last_wrong_answer 快照
+    rightAnswer: Optional[AnswerValue] = None  # 题目正确答案/参考答案
+    category: WrongCategoryOut
+
+
+class WrongListResult(BaseModel):
+    list: list[WrongListItem]
+    total: int
+    pageNum: int
+    pageSize: int
+
+
+class ReviewSetRequest(BaseModel):
+    """POST /wrong-questions/review-set（缺省待复习）。"""
+
+    mastery: Literal["all", "reviewing", "mastered"] = "reviewing"
+
+
+class ReviewSetItem(BaseModel):
+    id: int  # 错题 id
+    questionId: int
+    content: str
+    type: str
+    options: Optional[list[PaperOptionOut]] = None  # 仅单选/多选
+    myAnswer: Optional[AnswerValue] = None
+    rightAnswer: Optional[AnswerValue] = None
+    # 增量字段（04 契约补充）：重做头部徽章与无选项题解析展示所需
+    wrongCount: int
+    corrected: int
+    level: str
+    analysis: Optional[str] = None
+
+
+class ReviewSetResult(BaseModel):
+    questions: list[ReviewSetItem]
+
+
+class WrongBatchRequest(BaseModel):
+    """批量标记/移除（1~100 条，整批原子执行）。"""
+
+    ids: list[int] = Field(min_length=1, max_length=100)

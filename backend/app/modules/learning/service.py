@@ -12,12 +12,16 @@
 （03 §5.2 统计唯一数据源）；答错自动归集错题本（Q3 仅重做场景计纠正进度、S8 复活、S10 不回退）。
 """
 import random
+from datetime import timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import (
+    WRONG_LEVEL_HIGH_FREQ,
+    WRONG_LEVEL_MULTIPLE,
+    WRONG_LEVEL_OCCASIONAL,
     AnswerScene,
     Difficulty,
     EnableStatus,
@@ -43,6 +47,9 @@ from app.modules.learning.schemas import (
     QuestionListItem,
     QuestionListResult,
     QuestionOptionOut,
+    ReviewSetItem,
+    ReviewSetRequest,
+    ReviewSetResult,
     RouteCourseItem,
     RouteDetail,
     RouteListItem,
@@ -50,6 +57,13 @@ from app.modules.learning.schemas import (
     RouteSubjectCard,
     ShortGradeResult,
     StageQuestionQuery,
+    WrongBatchRequest,
+    WrongCategoryOut,
+    WrongListItem,
+    WrongListQuery,
+    WrongListResult,
+    WrongStatsResult,
+    WrongTop3Item,
 )
 
 
@@ -692,3 +706,371 @@ async def _apply_review_correct(db: AsyncSession, student_id: int, question_id: 
     if row.correct_streak >= 3 and row.mastery_status == int(MasteryStatus.REVIEWING):
         row.mastery_status = int(MasteryStatus.MASTERED)
         row.mastered_at = utc_now()
+
+
+# ===================== 错题本（04 §3.3 #22-28 / 需求 3.6） =====================
+# 口径：错题行随父过滤（S1 题目/阶段/学科删除即隐藏、恢复即可见）；等级由 wrong_count
+# 派生不落库；掌握单向（S10，仅标记不可取消）；移除=逻辑删除（S8 再答错复活续增）；
+# 纠正进度=correct_streak（Q3 仅重做场景计/清零）。admin 身份无学习数据：读=空、写=拒绝。
+
+
+def _wrong_level(wrong_count: int) -> str:
+    if wrong_count >= 3:
+        return WRONG_LEVEL_HIGH_FREQ
+    if wrong_count == 2:
+        return WRONG_LEVEL_MULTIPLE
+    return WRONG_LEVEL_OCCASIONAL
+
+
+def _answer_display(value: object) -> object:
+    """快照原样返回（单/多选=选项键数组、判断=bool、简答=文本，03 附录 A）。"""
+    return value
+
+
+async def _right_answer(db: AsyncSession, question: Question) -> object | None:
+    """题目正确答案（与作答同形态）：单/多选=正确键数组、判断=bool、简答=参考答案。"""
+    return (await _right_answers(db, [question])).get(question.id)
+
+
+async def _right_answers(db: AsyncSession, questions: list[Question]) -> dict[int, object]:
+    """批量取正确答案（一次聚合防 N+1）。"""
+    out: dict[int, object] = {}
+    multi_ids: list[int] = []
+    for q in questions:
+        qtype = QuestionType(q.type)
+        if qtype in (QuestionType.SINGLE, QuestionType.MULTIPLE):
+            multi_ids.append(q.id)
+        elif qtype == QuestionType.JUDGE:
+            out[q.id] = bool(q.judge_answer)
+        else:
+            out[q.id] = q.reference_answer
+    if multi_ids:
+        opt_rows = (
+            await db.execute(
+                select(QuestionOption.question_id, QuestionOption.option_key)
+                .where(
+                    QuestionOption.question_id.in_(multi_ids),
+                    QuestionOption.is_correct == 1,
+                )
+                .order_by(QuestionOption.sort_order, QuestionOption.option_key)
+            )
+        ).all()
+        keys_by_q: dict[int, list[str]] = {}
+        for qid, key in opt_rows:
+            keys_by_q.setdefault(int(qid), []).append(key)
+        for qid in multi_ids:
+            out[qid] = keys_by_q.get(qid, [])
+    return out
+
+
+def _wrong_filters(student_id: int, mastery: str | None = None) -> list:
+    """错题行过滤：活动行 + 随父过滤（S1）。"""
+    filters = [
+        WrongQuestion.student_id == student_id,
+        WrongQuestion.deleted_at.is_(None),
+        Question.deleted_at.is_(None),
+        Stage.deleted_at.is_(None),
+        Subject.deleted_at.is_(None),
+    ]
+    if mastery == "reviewing":
+        filters.append(WrongQuestion.mastery_status == int(MasteryStatus.REVIEWING))
+    elif mastery == "mastered":
+        filters.append(WrongQuestion.mastery_status == int(MasteryStatus.MASTERED))
+    return filters
+
+
+async def wrong_stats(db: AsyncSession, student_id: int | None) -> dict:
+    """统计卡 + 高频 Top3 + 分类下拉（全量，不受列表筛选影响）。"""
+    if student_id is None:
+        return WrongStatsResult(
+            total=0, reviewing=0, mastered=0, masteryRate=0.0, top3=[], categories=[]
+        ).model_dump()
+
+    rows = (
+        await db.execute(
+            select(
+                WrongQuestion.mastery_status,
+                func.count(WrongQuestion.id),
+            )
+            .select_from(WrongQuestion)
+            .join(Question, Question.id == WrongQuestion.question_id)
+            .join(Stage, Stage.id == Question.stage_id)
+            .join(Subject, Subject.id == Stage.subject_id)
+            .where(*_wrong_filters(student_id))
+            .group_by(WrongQuestion.mastery_status)
+        )
+    ).all()
+    counts = {int(status): int(n) for status, n in rows}
+    total = sum(counts.values())
+    mastered = counts.get(int(MasteryStatus.MASTERED), 0)
+
+    top_rows = (
+        await db.execute(
+            select(WrongQuestion.id, WrongQuestion.question_id, Question.content, WrongQuestion.wrong_count)
+            .select_from(WrongQuestion)
+            .join(Question, Question.id == WrongQuestion.question_id)
+            .join(Stage, Stage.id == Question.stage_id)
+            .join(Subject, Subject.id == Stage.subject_id)
+            .where(*_wrong_filters(student_id, "reviewing"))
+            .order_by(
+                WrongQuestion.wrong_count.desc(),
+                WrongQuestion.last_wrong_at.desc(),
+                WrongQuestion.id.desc(),
+            )
+            .limit(3)
+        )
+    ).all()
+
+    cat_rows = (
+        await db.execute(
+            select(Stage.name, Subject.name, Subject.sort_order, Subject.id, Stage.sort_order, Stage.id)
+            .select_from(WrongQuestion)
+            .join(Question, Question.id == WrongQuestion.question_id)
+            .join(Stage, Stage.id == Question.stage_id)
+            .join(Subject, Subject.id == Stage.subject_id)
+            .where(*_wrong_filters(student_id))
+            .order_by(Subject.sort_order, Subject.id, Stage.sort_order, Stage.id)
+        )
+    ).all()
+    categories: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for stage_name, subject_name, *_ in cat_rows:
+        key = (stage_name, subject_name)
+        if key not in seen:
+            seen.add(key)
+            categories.append(WrongCategoryOut(stageName=stage_name, subjectName=subject_name).model_dump())
+
+    return WrongStatsResult(
+        total=total,
+        reviewing=total - mastered,
+        mastered=mastered,
+        masteryRate=round(mastered / total * 100, 1) if total else 0.0,
+        top3=[
+            WrongTop3Item(id=int(r[0]), questionId=int(r[1]), content=r[2], wrongCount=int(r[3])).model_dump()
+            for r in top_rows
+        ],
+        categories=categories,
+    ).model_dump()
+
+
+async def wrong_list(db: AsyncSession, student_id: int | None, q: WrongListQuery) -> dict:
+    """错题列表（筛选/排序/分页；myAnswer=最近答错快照、rightAnswer=题目正确答案）。"""
+    if student_id is None:
+        return WrongListResult(list=[], total=0, pageNum=q.pageNum, pageSize=q.pageSize).model_dump()
+
+    filters = _wrong_filters(student_id, q.mastery)
+    if q.category:
+        filters.append(Stage.name == q.category)
+    if q.keyword and q.keyword.strip():
+        filters.append(Question.content.like(f"%{q.keyword.strip()}%"))
+    if q.timeRange in ("7d", "30d"):
+        days = 7 if q.timeRange == "7d" else 30
+        filters.append(WrongQuestion.last_wrong_at >= utc_now() - timedelta(days=days))
+
+    order = (
+        (WrongQuestion.wrong_count.desc(), WrongQuestion.last_wrong_at.desc(), WrongQuestion.id.desc())
+        if q.sort == "wrongCount"
+        else (WrongQuestion.last_wrong_at.desc(), WrongQuestion.wrong_count.desc(), WrongQuestion.id.desc())
+    )
+
+    total = (
+        await db.execute(
+            select(func.count(WrongQuestion.id))
+            .select_from(WrongQuestion)
+            .join(Question, Question.id == WrongQuestion.question_id)
+            .join(Stage, Stage.id == Question.stage_id)
+            .join(Subject, Subject.id == Stage.subject_id)
+            .where(*filters)
+        )
+    ).scalar_one()
+    rows = (
+        (
+            await db.execute(
+                select(WrongQuestion, Question, Stage.name, Subject.name)
+                .select_from(WrongQuestion)
+                .join(Question, Question.id == WrongQuestion.question_id)
+                .join(Stage, Stage.id == Question.stage_id)
+                .join(Subject, Subject.id == Stage.subject_id)
+                .where(*filters)
+                .order_by(*order)
+                .offset((q.pageNum - 1) * q.pageSize)
+                .limit(q.pageSize)
+            )
+        )
+        .all()
+    )
+
+    right = await _right_answers(db, [question for _, question, _, _ in rows])
+
+    items = [
+        WrongListItem(
+            id=w.id,
+            questionId=w.question_id,
+            content=question.content,
+            type=QuestionType(question.type).api,
+            level=_wrong_level(w.wrong_count),
+            corrected=w.correct_streak,
+            masteryStatus=MasteryStatus(w.mastery_status).api,
+            lastWrongAt=to_shanghai(w.last_wrong_at),
+            wrongCount=w.wrong_count,
+            myAnswer=_answer_display(w.last_wrong_answer),
+            rightAnswer=right.get(question.id),
+            category=WrongCategoryOut(stageName=stage_name, subjectName=subject_name),
+        ).model_dump()
+        for w, question, stage_name, subject_name in rows
+    ]
+    return WrongListResult(
+        list=items, total=int(total), pageNum=q.pageNum, pageSize=q.pageSize
+    ).model_dump()
+
+
+async def review_set(db: AsyncSession, student_id: int | None, req: ReviewSetRequest) -> dict:
+    """重做题目集（默认待复习；按最近答错倒序，重做判分复用 /practice/answers）。"""
+    if student_id is None:
+        return ReviewSetResult(questions=[]).model_dump()
+    rows = (
+        (
+            await db.execute(
+                select(WrongQuestion, Question)
+                .select_from(WrongQuestion)
+                .join(Question, Question.id == WrongQuestion.question_id)
+                .join(Stage, Stage.id == Question.stage_id)
+                .join(Subject, Subject.id == Stage.subject_id)
+                .where(*_wrong_filters(student_id, req.mastery))
+                .order_by(
+                    WrongQuestion.last_wrong_at.desc(),
+                    WrongQuestion.wrong_count.desc(),
+                    WrongQuestion.id.desc(),
+                )
+            )
+        )
+        .all()
+    )
+
+    multi_ids = [
+        question.id
+        for _, question in rows
+        if int(question.type) in (int(QuestionType.SINGLE), int(QuestionType.MULTIPLE))
+    ]
+    opts_by_q: dict[int, list[dict]] = {}
+    if multi_ids:
+        opt_rows = (
+            await db.execute(
+                select(QuestionOption.question_id, QuestionOption.option_key, QuestionOption.content)
+                .where(QuestionOption.question_id.in_(multi_ids))
+                .order_by(QuestionOption.sort_order, QuestionOption.option_key)
+            )
+        ).all()
+        for qid, key, content in opt_rows:
+            opts_by_q.setdefault(int(qid), []).append(
+                PaperOptionOut(key=key, content=content).model_dump()
+            )
+
+    questions = []
+    right = await _right_answers(db, [question for _, question in rows])
+    for w, question in rows:
+        questions.append(
+            ReviewSetItem(
+                id=w.id,
+                questionId=w.question_id,
+                content=question.content,
+                type=QuestionType(question.type).api,
+                options=opts_by_q.get(question.id),
+                myAnswer=_answer_display(w.last_wrong_answer),
+                rightAnswer=right.get(question.id),
+                wrongCount=w.wrong_count,
+                corrected=w.correct_streak,
+                level=_wrong_level(w.wrong_count),
+                analysis=question.analysis,
+            ).model_dump()
+        )
+    return ReviewSetResult(questions=questions).model_dump()
+
+
+async def _load_active_wrong(
+    db: AsyncSession, student_id: int | None, wrong_id: int
+) -> WrongQuestion:
+    """取活动错题行（不存在/已移除 → 404）。"""
+    if student_id is None:
+        raise BizError(
+            ErrorCode.PARAM_VALIDATION_FAILED, "后台账号无学习数据，请使用学员账号", http_status=400
+        )
+    row = (
+        (
+            await db.execute(
+                select(WrongQuestion).where(
+                    WrongQuestion.id == wrong_id,
+                    WrongQuestion.student_id == student_id,
+                    WrongQuestion.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        raise BizError(ErrorCode.RESOURCE_NOT_FOUND, "错题不存在或已移除", http_status=404)
+    return row
+
+
+async def master_wrong(db: AsyncSession, student_id: int | None, wrong_id: int) -> dict:
+    """标记已掌握（幂等；掌握单向 S10，仅标记不可取消）。"""
+    row = await _load_active_wrong(db, student_id, wrong_id)
+    if row.mastery_status == int(MasteryStatus.REVIEWING):
+        row.mastery_status = int(MasteryStatus.MASTERED)
+        row.mastered_at = utc_now()
+        await db.commit()
+    return {"success": True}
+
+
+async def remove_wrong(db: AsyncSession, student_id: int | None, wrong_id: int) -> dict:
+    """移除错题（逻辑删除；同题再答错复活续增 S8）。"""
+    row = await _load_active_wrong(db, student_id, wrong_id)
+    row.deleted_at = utc_now()
+    await db.commit()
+    return {"success": True}
+
+
+async def batch_master(db: AsyncSession, student_id: int | None, req: WrongBatchRequest) -> dict:
+    """批量标记已掌握（逐条同单条语义，整批原子执行；无效 id 计入 skipped，S15）。"""
+    return await _batch_apply(db, student_id, req, master=True)
+
+
+async def batch_remove(db: AsyncSession, student_id: int | None, req: WrongBatchRequest) -> dict:
+    """批量移除（逐条同单条语义，整批原子执行；无效 id 计入 skipped，S15）。"""
+    return await _batch_apply(db, student_id, req, master=False)
+
+
+async def _batch_apply(
+    db: AsyncSession, student_id: int | None, req: WrongBatchRequest, master: bool
+) -> dict:
+    if student_id is None:
+        raise BizError(
+            ErrorCode.PARAM_VALIDATION_FAILED, "后台账号无学习数据，请使用学员账号", http_status=400
+        )
+    ids = list(dict.fromkeys(req.ids))  # 去重保序
+    rows = (
+        (
+            await db.execute(
+                select(WrongQuestion).where(
+                    WrongQuestion.id.in_(ids),
+                    WrongQuestion.student_id == student_id,
+                    WrongQuestion.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    found = {r.id for r in rows}
+    skipped = [i for i in ids if i not in found]
+    now = utc_now()
+    for r in rows:
+        if master:
+            if r.mastery_status == int(MasteryStatus.REVIEWING):
+                r.mastery_status = int(MasteryStatus.MASTERED)
+                r.mastered_at = now
+        else:
+            r.deleted_at = now
+    await db.commit()
+    return {"success": True, "affected": len(rows), "skipped": skipped}

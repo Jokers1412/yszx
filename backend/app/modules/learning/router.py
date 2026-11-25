@@ -5,7 +5,7 @@
   POST /practice/paper | /practice/answers
   /wrong-questions*（统计卡/列表/重做/批量）
   /routes* | POST /courses/{id}/complete
-题库/学习路线（#16-19/#29-32）与刷题练习（#20-21）已实现；错题待后续功能开发。
+题库（#16-19）、刷题练习（#20-21）、错题本（#22-28）、学习路线（#29-32）已全量实现。
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,8 +17,11 @@ from app.modules.learning import service
 from app.modules.learning.schemas import (
     PracticeAnswerRequest,
     PracticePaperRequest,
+    ReviewSetRequest,
     RouteListQuery,
     StageQuestionQuery,
+    WrongBatchRequest,
+    WrongListQuery,
 )
 
 router = APIRouter(tags=["learning"])
@@ -69,6 +72,78 @@ async def practice_answers(
 ):
     """提交作答判分（客观题即时判分；简答 AI 批改，失败 503 可重试）。"""
     return ok(await service.submit_answer(db, ctx.student_id, req))
+
+
+# ===================== 错题本（04 §3.3 #22-28 / 需求 3.6） =====================
+
+
+@router.get("/wrong-questions/stats")
+async def wrong_stats(
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """统计卡 + 高频错题 Top3 + 分类下拉。"""
+    return ok(await service.wrong_stats(db, ctx.student_id))
+
+
+@router.get("/wrong-questions")
+async def wrong_list(
+    q: WrongListQuery = Depends(),
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """错题列表（状态/分类/时间筛选 + 排序 + 分页）。"""
+    return ok(await service.wrong_list(db, ctx.student_id, q))
+
+
+@router.post("/wrong-questions/review-set")
+async def review_set(
+    req: ReviewSetRequest,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """重做题目集（默认待复习；重做判分复用 /practice/answers scene=wrongReview）。"""
+    return ok(await service.review_set(db, ctx.student_id, req))
+
+
+@router.post("/wrong-questions/{wrong_id}/master")
+async def master_wrong(
+    wrong_id: int,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """标记已掌握（幂等；掌握单向 S10）。"""
+    return ok(await service.master_wrong(db, ctx.student_id, wrong_id))
+
+
+@router.delete("/wrong-questions/{wrong_id}")
+async def remove_wrong(
+    wrong_id: int,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """移除错题（逻辑删除；同题再答错复活续增 S8）。"""
+    return ok(await service.remove_wrong(db, ctx.student_id, wrong_id))
+
+
+@router.post("/wrong-questions/batch-master")
+async def batch_master(
+    req: WrongBatchRequest,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量标记已掌握（逐条同单条语义，整批原子执行）。"""
+    return ok(await service.batch_master(db, ctx.student_id, req))
+
+
+@router.post("/wrong-questions/batch-remove")
+async def batch_remove(
+    req: WrongBatchRequest,
+    ctx: StudentContext = Depends(get_current_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量移除（逐条同单条语义，整批原子执行）。"""
+    return ok(await service.batch_remove(db, ctx.student_id, req))
 
 
 # ===================== 学习路线（04 §3.3 #29-32 / 需求 3.7） =====================
